@@ -10,9 +10,14 @@ const els = {
   userInfo: document.getElementById('userInfo'),
 
   tabProfiles: document.getElementById('tabProfiles'),
+  tabSettings: document.getElementById('tabSettings'),
   tabAccounts: document.getElementById('tabAccounts'),
   profilesView: document.getElementById('profilesView'),
+  settingsView: document.getElementById('settingsView'),
   accountsView: document.getElementById('accountsView'),
+  pageTitle: document.getElementById('pageTitle'),
+  pageSubtitle: document.getElementById('pageSubtitle'),
+  profileDirtyBadge: document.getElementById('profileDirtyBadge'),
 
   loadingOverlay: document.getElementById('loadingOverlay'),
   loadingText: document.getElementById('loadingText'),
@@ -278,6 +283,7 @@ async function loadSelectedProfile() {
   if (!name) return;
   const body = await api(`/api/profiles/${encodeURIComponent(name)}`);
   setFormFromProfile(body.profile || {});
+  clearProfileDirty();
   log(`Loaded profile: ${name}`);
   await loadAdminRowTable();
 }
@@ -534,6 +540,7 @@ async function saveCurrentProfile() {
     });
     await refreshProfiles();
     els.profileSelect.value = body.profile.name;
+    clearProfileDirty();
     log(`Saved profile: ${body.path}`);
   } catch (error) {
     alert(error.message);
@@ -915,18 +922,22 @@ function initZoomPan() {
 
 /* ---------- Tabs ---------- */
 function showTab(name) {
-  if (name === 'profiles') {
-    els.profilesView.classList.remove('hidden');
-    els.accountsView.classList.add('hidden');
-    els.tabProfiles.classList.add('active');
-    els.tabAccounts.classList.remove('active');
-  } else {
-    els.profilesView.classList.add('hidden');
-    els.accountsView.classList.remove('hidden');
-    els.tabProfiles.classList.remove('active');
-    els.tabAccounts.classList.add('active');
+  const sections = {
+    profiles: { view: 'profilesView', tab: 'tabProfiles', title: 'Profiles', subtitle: 'Read billing data from Google Sheets and generate slide bills.' },
+    settings: { view: 'settingsView', tab: 'tabSettings', title: 'Settings', subtitle: 'Database backup, Google credentials, and Zalo delivery.' },
+    accounts: { view: 'accountsView', tab: 'tabAccounts', title: 'Accounts', subtitle: 'Manage admin and client accounts.' }
+  };
+  const target = sections[name] || sections.profiles;
+  for (const [key, meta] of Object.entries(sections)) {
+    const view = document.getElementById(meta.view);
+    const tab = document.getElementById(meta.tab);
+    if (view) view.classList.toggle('hidden', key !== name);
+    if (tab) tab.classList.toggle('active', key === name);
   }
+  if (els.pageTitle) els.pageTitle.textContent = target.title;
+  if (els.pageSubtitle) els.pageSubtitle.textContent = target.subtitle;
 }
+
 
 /* ---------- Account Management ---------- */
 function renderAccProfileChecklist(selected = []) {
@@ -1054,10 +1065,37 @@ function newAccount() {
   log('New account form prepared. Fill in username and password, then Save.');
 }
 
+/* ---------- Unsaved-changes indicator ---------- */
+let profileDirty = false;
+function markProfileDirty() {
+  profileDirty = true;
+  renderProfileDirtyBadge();
+}
+function clearProfileDirty() {
+  profileDirty = false;
+  renderProfileDirtyBadge();
+}
+function renderProfileDirtyBadge() {
+  if (!els.profileDirtyBadge) return;
+  els.profileDirtyBadge.textContent = profileDirty ? '● Unsaved changes' : '';
+}
+
 function bindEvents() {
-  // Tabs
+  // Tabs / sidebar nav
   els.tabProfiles.addEventListener('click', () => showTab('profiles'));
+  els.tabSettings.addEventListener('click', () => showTab('settings'));
   els.tabAccounts.addEventListener('click', () => showTab('accounts'));
+
+  // Unsaved-changes tracking: any edit inside the profile editor flags the bar.
+  if (els.profilesView) {
+    const markDirty = (e) => {
+      // Skip file inputs and the read-only row list, which do not change a profile.
+      if (e.target && (e.target.type === 'file' || e.target.id === 'selected_sheet_rows')) return;
+      markProfileDirty();
+    };
+    els.profilesView.addEventListener('input', markDirty);
+    els.profilesView.addEventListener('change', markDirty);
+  }
 
   // Auth
   els.logoutBtn.addEventListener('click', async () => {
@@ -1458,6 +1496,7 @@ function insertZaloToken(token) {
   const caret = start + snippet.length;
   el.focus();
   if (el.setSelectionRange) el.setSelectionRange(caret, caret);
+  markProfileDirty();
 }
 
 function renderZaloTokenRow(container, tokens, isColumn) {
@@ -1536,11 +1575,13 @@ function useZaloDefaultTemplate() {
     return alert('Run "Preview message & load tokens" first, so the built-in default is available.');
   }
   if (els.zaloBotMessageTemplate) els.zaloBotMessageTemplate.value = zaloDefaultTemplate;
+  markProfileDirty();
   log('Inserted the built-in default message template.');
 }
 
 function clearZaloMessageTemplate() {
   if (els.zaloBotMessageTemplate) els.zaloBotMessageTemplate.value = '';
+  markProfileDirty();
   if (els.zaloMessageStatus) els.zaloMessageStatus.textContent = 'cleared - the built-in default will be used';
 }
 

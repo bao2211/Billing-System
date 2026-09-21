@@ -7,534 +7,603 @@
   <link rel="stylesheet" href="/admin/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <strong>Admin Portal</strong>
-      <span class="muted">Billing System</span>
-    </div>
-    <div class="topbar-right">
-      <span id="userInfo"></span>
-      <button id="logoutBtn">Logout</button>
-    </div>
-  </header>
-
-  <nav class="tabs">
-    <button id="tabProfiles" class="tab active">Profiles</button>
-    <button id="tabAccounts" class="tab">Accounts</button>
-  </nav>
-
-  <!-- Profiles View -->
-  <main id="profilesView" class="admin-layout">
-    <aside class="panel sidebar">
-      <h2>Profiles</h2>
-      <div class="row">
-        <select id="profileSelect" size="10"></select>
+  <!-- Persistent navigation -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">B</div>
+      <div>
+        <div class="brand-name">Billing System</div>
+        <div class="brand-sub">Admin console</div>
       </div>
-      <div class="actions">
-        <button id="newProfileBtn">New</button>
-        <button id="deleteProfileBtn" class="danger">Delete</button>
-        <button id="refreshProfilesBtn">Refresh</button>
+    </div>
+
+    <div class="nav-label">Workspace</div>
+    <button id="tabProfiles" class="nav-item active">Profiles</button>
+    <button id="tabSettings" class="nav-item">Settings</button>
+    <button id="tabAccounts" class="nav-item">Accounts</button>
+
+    <div class="sidebar-footer">
+      <span id="userInfo" class="sidebar-user"></span>
+      <button id="logoutBtn" class="ghost">Logout</button>
+    </div>
+  </aside>
+
+  <!-- Main content column -->
+  <div class="content">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Profiles</h1>
+        <span class="subtitle" id="pageSubtitle">Read billing data from Google Sheets and generate slide bills.</span>
       </div>
-    </aside>
+      <div class="topbar-right"></div>
+    </header>
 
-    <section class="panel editor">
-      <h2>Profile Configuration</h2>
-      <p class="editor-hint">Configure how this profile reads billing data from Google Sheets and generates slide bills.</p>
+    <div class="scroll-area">
 
-      <!-- Upload / Download Database -->
-      <fieldset class="form-section">
-        <legend>Database Backup & Restore</legend>
-        <p class="hint">Upload or download your <code>users.json</code> and profile JSON files. Use this to migrate data between servers or create backups.</p>
-
-        <h4 style="margin:12px 0 6px; font-size:14px;">Upload (Restore)</h4>
-        <div class="grid">
-          <label>
-            users.json
-            <input id="dbUsersFile" type="file" accept=".json" />
-          </label>
-          <label>
-            Profile JSONs
-            <input id="dbProfileFiles" type="file" accept=".json" multiple />
-          </label>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:8px;">
-          <button id="uploadDatabaseBtn" type="button" class="primary">Upload Database</button>
-          <span id="dbUploadStatus" class="muted"></span>
-        </div>
-
-        <h4 style="margin:16px 0 6px; font-size:14px;">Download (Backup)</h4>
-        <div class="actions" style="border-top:none; padding-top:4px;">
-          <button id="downloadUsersBtn" type="button">Download Users (users.json)</button>
-          <button id="downloadProfilesBtn" type="button">Download Profiles (zip)</button>
-          <button id="downloadDatabaseBtn" type="button" class="primary">Download Full Database (zip)</button>
-        </div>
-      </fieldset>
-
-      <!-- Upload Credentials -->
-      <fieldset class="form-section">
-        <legend>Upload Google Credentials</legend>
-        <p class="hint">Upload your Google OAuth credential file and token file so profiles can authenticate with Google APIs.</p>
-        <div class="grid">
-          <label>
-            Credentials JSON (client_secret_*.json)
-            <input id="credFile" type="file" accept=".json" />
-          </label>
-          <label>
-            Token JSON (*.apps.googleusercontent.com.json)
-            <input id="tokenFile" type="file" accept=".json" />
-          </label>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:8px;">
-          <button id="uploadCredentialsBtn" type="button" class="primary">Upload Credentials</button>
-          <span id="credUploadStatus" class="muted"></span>
-        </div>
-        <p class="hint" style="margin-top:6px;">
-          After uploading, set <strong>credentials_file</strong> to <code>/app/google_credentials.json</code> and <strong>token_file</strong> to <code>/app/google_token.json</code> in your profiles.
-        </p>
-      </fieldset>
-
-      <!-- Zalo delivery (global) -->
-      <fieldset class="form-section">
-        <legend>Zalo delivery (global)</legend>
-        <p class="hint">One Zalo identity for the whole company. Tokens live in <code>zalo_config.json</code> (outside the profile, never committed to git). Pick the provider, then fill in the matching credentials.</p>
-        <div class="grid">
-          <label>Provider
-            <span class="field-hint">ZNS template by phone number, or Bot Platform chat message.</span>
-            <select id="zaloProvider">
-              <option value="oa">Zalo Official Account / ZNS (template by phone)</option>
-              <option value="bot">Zalo Bot Platform (chat message)</option>
-            </select>
-          </label>
-        </div>
-
-        <div id="zaloOaFields">
-          <div class="grid">
-            <label>OA access token<input id="zaloAccessToken" type="password" placeholder="paste the OA access token" /></label>
-            <label>OA id (optional)<input id="zalo_oa_id" type="text" placeholder="e.g. 1234567890" /></label>
+      <!-- ===================== Profiles view ===================== -->
+      <main id="profilesView" class="admin-layout">
+        <aside class="panel sidebar-list">
+          <h3>Profiles</h3>
+          <div class="row">
+            <select id="profileSelect" size="12"></select>
           </div>
-        </div>
-
-        <div id="zaloBotFields">
-          <div class="grid">
-            <label>Bot token
-              <span class="field-hint">Zalo Bot Manager sends it as &lt;id&gt;:&lt;secret&gt;.</span>
-              <input id="zaloBotToken" type="password" placeholder="3576164315943503983:UxJIJ..." />
-            </label>
-            <label>Bot account
-              <span class="field-hint">Filled in by "Verify bot token".</span>
-              <input id="zaloBotAccount" type="text" readonly placeholder="not verified yet" />
-            </label>
+          <div class="actions">
+            <button id="newProfileBtn">New</button>
+            <button id="deleteProfileBtn" class="danger">Delete</button>
+            <button id="refreshProfilesBtn">Refresh</button>
           </div>
-          <label class="checkbox-inline">
-            <input id="zaloBotAutoReply" type="checkbox" /> Reply automatically so a tenant can link their phone
-          </label>
-          <label class="checkbox-inline">
-            <input id="zaloPreferFreeBot" type="checkbox" /> Use the free bot chat when a tenant has one, instead of a paid ZNS template
-          </label>
-          <label class="checkbox-inline">
-            <input id="zaloZnsFallback" type="checkbox" /> Fall back to a ZNS template when a tenant has never opened the bot
-          </label>
-          <p class="hint" style="margin:4px 0 0;">
-            A bot can only message a chat that already exists, so a tenant who has never opened the bot
-            cannot receive a bot message at all. <strong>ZBS Template Message</strong> is the only channel that
-            reaches someone who has not interacted with you: it is addressed by phone number, needs a
-            Zalo-approved template id and is billed per message. Leave the fallback off until you have an
-            OA access token and an approved template.
-          </p>
-          <div class="actions" style="border-top:none; padding-top:6px;">
-            <button id="zaloBotVerifyBtn" type="button">Verify bot token</button>
-            <button id="zaloBotPollBtn" type="button">Poll inbox now (5s)</button>
-            <button id="zaloBotWebhookInfoBtn" type="button">Webhook info</button>
-            <span id="zaloBotHint" class="muted"></span>
-          </div>
-          <p class="hint" style="margin:6px 0 0;">
-            Tenants must open the bot once and send the phone number on their bill before a bill can be delivered
-            (Zalo only allows a bot to message a chat that already exists).
-            Share link: <a id="zaloBotShareLink" href="#" target="_blank" rel="noopener">-</a>
-          </p>
-          <div id="zaloSubscribersWrap" style="margin-top:8px;">
-            <table class="data-table" id="zaloSubscribersTable" style="width:100%; font-size:12px;">
-              <thead>
-                <tr><th>Chat</th><th>Name</th><th>Phone</th><th>Linked</th><th>Msgs</th><th></th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-            <p class="hint" id="zaloSubscribersEmpty" style="margin:6px 0 0;">No tenant has messaged the bot yet.</p>
-          </div>
-        </div>
-        <label class="checkbox-inline">
-          <input id="zaloDryRun" type="checkbox" /> Dry-run: build and log every message, never send
-        </label>
-        <div class="actions" style="border-top:none; padding-top:8px;">
-          <button id="zaloSaveConfigBtn" type="button" class="primary">Save Zalo settings</button>
-          <button id="zaloVerifyDriveBtn" type="button">Verify Drive folder</button>
-          <span id="zaloStatus" class="muted"></span>
-        </div>
-        <div class="grid">
-          <label>Test phone number<input id="zaloTestPhone" type="text" placeholder="0987654321" /></label>
-          <label>Test chat id (bot)
-            <span class="field-hint">Leave blank to use the phone above, which must already be linked.</span>
-            <input id="zaloTestChatId" type="text" placeholder="6ede9afa66b88fe6d6a9" />
-          </label>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:4px;">
-          <button id="zaloTestSendBtn" type="button">Test message (dry-run)</button>
-          <button id="zaloTestSendLiveBtn" type="button" class="danger">Send test for real</button>
-          <button id="zaloBotSendTestBtn" type="button">Send bot test for real</button>
-          <button id="zaloTestRowBtn" type="button">Build from sheet row</button>
-        </div>
-        <pre id="zaloResult" style="display:none; max-height:220px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px;"></pre>
-      </fieldset>
+        </aside>
 
-      <!-- Identity -->
-      <fieldset class="form-section">
-        <legend>Profile Identity</legend>
-        <div class="grid">
-          <label>
-            Profile Name
-            <span class="field-hint">Unique name for this billing configuration.</span>
-            <input id="name" type="text" placeholder="e.g., monthly_bills_q1" />
-          </label>
-        </div>
-      </fieldset>
+        <section class="panel editor">
+          <h2>Profile Configuration</h2>
+          <p class="editor-hint">Configure how this profile reads billing data from Google Sheets and generates slide bills.</p>
 
-      <!-- Data Source -->
-      <fieldset class="form-section">
-        <legend>Google Sheet Data Source</legend>
-        <div class="grid">
-          <label>
-            Spreadsheet ID
-            <span class="field-hint">The ID from your Google Sheets URL.</span>
-            <input id="spreadsheet_id" type="text" placeholder="1a2b3c..." />
-          </label>
-          <label>
-            Sheet Name
-            <span class="field-hint">The tab name inside the spreadsheet (e.g., "Invoices").</span>
-            <input id="sheet_name" type="text" placeholder="Sheet1" />
-          </label>
-          <label>
-            Sheet Range
-            <span class="field-hint">Cell range to read. Leave as A1:ZZ to scan all columns.</span>
-            <input id="sheet_range" type="text" placeholder="A1:ZZ" />
-          </label>
-          <label>
-            Header Row
-            <span class="field-hint">Row number containing column headers (usually 1).</span>
-            <input id="header_row_index" type="number" min="1" placeholder="1" />
-          </label>
-          <label>
-            Data Starts At Row
-            <span class="field-hint">First row of actual billing data (usually 2).</span>
-            <input id="data_start_row_index" type="number" min="1" placeholder="2" />
-          </label>
-          <label>
-            Max Rows (optional)
-            <span class="field-hint">Limit rows processed. Leave blank for all.</span>
-            <input id="max_rows" type="number" min="1" placeholder="Unlimited" />
-          </label>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:6px;">
-          <button id="detectColumnsBtn" type="button">Detect Columns</button>
-        </div>
-
-        <div id="detectResult" class="detect-panel hidden">
-          <h4>Detected Columns</h4>
-          <div class="detect-grid" id="detectGrid"></div>
-          <div class="actions" style="border-top:none; padding-top:6px;">
-            <button id="applyMappingBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
-          </div>
-        </div>
-      </fieldset>
-
-      <!-- Template & Output -->
-      <fieldset class="form-section">
-        <legend>Template & Destination</legend>
-        <div class="grid">
-          <label>
-            Slide Template ID
-            <span class="field-hint">Google Slides presentation ID used as the bill template.</span>
-            <input id="template_presentation_id" type="text" placeholder="1x2y3z..." />
-          </label>
-          <label>
-            Destination Folder ID
-            <span class="field-hint">Google Drive folder ID where generated slides are saved.</span>
-            <input id="destination_folder_id" type="text" placeholder="Optional — leave blank for root" />
-          </label>
-          <label>
-            Output Format
-            <span class="field-hint">What to generate: slide images, PDF, or both.</span>
-            <select id="output_format">
-              <option value="both">Both (Images + PDF)</option>
-              <option value="images">Images only</option>
-              <option value="pdf">PDF only</option>
-            </select>
-          </label>
-        </div>
-      </fieldset>
-
-      <!-- Export Options -->
-      <fieldset class="form-section">
-        <legend>Export Options</legend>
-        <div class="checkboxes">
-          <label>
-            <input id="create_run_output_folder" type="checkbox" />
-            <span>Create a dated folder for each export run</span>
-          </label>
-          <label>
-            <input id="split_outputs_by_row" type="checkbox" />
-            <span>Save each bill in its own subfolder</span>
-          </label>
-          <label>
-            <input id="delete_generated_slides_after_export" type="checkbox" />
-            <span>Delete generated Google Slides after export</span>
-          </label>
-          <label>
-            <input id="skip_export_if_zero_or_empty" type="checkbox" />
-            <span>Skip rows where bill value is zero or empty</span>
-          </label>
-          <label>
-            <input id="export_selected_rows_only" type="checkbox" />
-            <span>Only export rows selected in the client portal</span>
-          </label>
-        </div>
-      </fieldset>
-
-      <!-- Zalo notifications (per profile) -->
-      <fieldset class="form-section">
-        <legend>Zalo notifications (this profile)</legend>
-        <p class="hint">After a bill is exported it is uploaded to the Drive folder and the tenant is notified on Zalo. The delivery provider is chosen in the global "Zalo delivery" panel above. Needs the phone column in the sheet.</p>
-        <label class="checkbox-inline"><input id="zalo_enabled" type="checkbox" /> Send each bill to the tenant's Zalo after export</label>
-        <label class="checkbox-inline"><input id="zalo_resend_already_sent" type="checkbox" /> Resend even if this month's bill was already sent</label>
-        <div class="grid">
-          <label>Phone column<input id="zalo_phone_column" type="text" placeholder="SĐT (empty = auto-detect)" /></label>
-          <label>Zalo template id<input id="zalo_template_id" type="text" placeholder="template_id approved by Zalo" /></label>
-          <label>Link placeholder name<input id="zalo_link_field" type="text" placeholder="link" /></label>
-          <label>Drive folder for bills<input id="zalo_drive_folder_id" type="text" placeholder="Drive folder id" /></label>
-        </div>
-        <label>Template field map — template parameter to sheet column, a {{token}} or a literal
-          <textarea id="zalo_field_map" rows="4" placeholder='{"customer":"Tên","room":"{{room}}","amount":"Tổng","link":"{{link}}"}'></textarea>
-        </label>
-        <div id="zaloBotMessageWrap">
-          <label>Bot message — what the tenant receives on Zalo
-            <span class="field-hint">Blank uses the built-in default. Click a token below to insert it at the cursor, or type any sheet column name. A line whose value is empty is dropped automatically.</span>
-            <textarea id="zalo_bot_message_template" rows="7" placeholder="🧾 HÓA ĐƠN THANH TOÁN&#10;Cơ sở: {{profile}}&#10;Phòng: {{room}}&#10;Kỳ: {{period}}&#10;Số tiền: {{total}}&#10;&#10;Xem hóa đơn: {{link}}"></textarea>
-          </label>
-
-          <div class="actions" style="border-top:none; padding-top:6px;">
-            <button id="zaloMessagePreviewBtn" type="button" class="primary">Preview message &amp; load tokens</button>
-            <button id="zaloMessageDefaultBtn" type="button">Insert default template</button>
-            <button id="zaloMessageClearBtn" type="button">Clear (use default)</button>
-            <span id="zaloMessageStatus" class="muted"></span>
-          </div>
-
-          <div style="margin-top:8px;">
-            <div class="field-hint" style="margin-bottom:4px;">Built-in tokens — work in every profile</div>
-            <div class="token-row" id="zaloBuiltinTokenRow"></div>
-          </div>
-
-          <div id="zaloSheetTokensWrap" class="hidden" style="margin-top:8px;">
-            <div class="field-hint" style="margin-bottom:4px;">Sheet columns — click to insert</div>
-            <div class="token-row" id="zaloSheetTokenRow"></div>
-          </div>
-
-          <label class="checkbox-inline"><input id="zalo_bot_send_photo" type="checkbox" /> Attach the bill image as a photo too (bot provider, images only)</label>
-
-          <div id="zaloMessagePreviewWrap" class="hidden" style="margin-top:8px;">
-            <div class="field-hint" style="margin-bottom:4px;">Preview — exactly what the tenant receives, for <span id="zaloPreviewRowLabel"></span></div>
-            <pre id="zaloMessagePreview" style="max-height:260px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; margin:0;"></pre>
-          </div>
-        </div>
-      </fieldset>
-
-      <!-- Advanced Settings (collapsible) -->
-      <fieldset class="form-section advanced-section">
-        <legend class="advanced-toggle" id="advancedToggle">
-          <span>Advanced Settings</span>
-          <span class="toggle-icon">▸</span>
-        </legend>
-        <div class="advanced-body hidden" id="advancedBody">
-          <div class="grid cols-3">
-            <label>
-              Copy Name Template
-              <span class="field-hint">Name pattern for copied slide files.</span>
-              <input id="copy_name_template" type="text" />
-            </label>
-            <label>
-              Run Folder Template
-              <span class="field-hint">Name pattern for export run folders.</span>
-              <input id="run_folder_name_template" type="text" />
-            </label>
-            <label>
-              Output File Template
-              <span class="field-hint">Name pattern for exported files.</span>
-              <input id="output_file_name_template" type="text" />
-            </label>
-          </div>
-
-          <div class="grid cols-3">
-            <label>
-              Output Directory
-              <span class="field-hint">Local folder path for downloads.</span>
-              <input id="output_dir" type="text" />
-            </label>
-            <label>
-              Credentials File
-              <span class="field-hint">Path to Google service account JSON.</span>
-              <input id="credentials_file" type="text" placeholder="Optional" />
-            </label>
-            <label>
-              Token File
-              <span class="field-hint">Path to OAuth token cache.</span>
-              <input id="token_file" type="text" />
-            </label>
-          </div>
-
-          <div class="grid cols-3">
-            <label>
-              Placeholder Strategy
-              <span class="field-hint">How sheet columns map to slide placeholders.</span>
-              <select id="placeholder_strategy">
-                <option value="mapping_with_fallback">Mapping with fallback</option>
-                <option value="header_braces">Header braces</option>
-                <option value="mapping_only">Mapping only</option>
-              </select>
-            </label>
-            <label>
-              Reference Strategy
-              <span class="field-hint">How cell values are matched to template references.</span>
-              <select id="reference_strategy">
-                <option value="identity">Identity</option>
-                <option value="strip_whitespace">Strip whitespace</option>
-                <option value="strip_currency">Strip currency</option>
-                <option value="template_map">Template map</option>
-              </select>
-            </label>
-            <label>
-              Skip Check Column
-              <span class="field-hint">Column name to check for zero/empty skip.</span>
-              <input id="skip_zero_or_empty_column" type="text" placeholder="Optional" />
-            </label>
-          </div>
-
-          <div class="actions" style="border-top:none; padding-top:6px;">
-            <button id="detectMappingsBtn" type="button">Auto-Match Headers ↔ Placeholders</button>
-          </div>
-          <div id="mappingDetectResult" class="detect-panel hidden">
-            <h4>Detected Mappings</h4>
-            <div class="detect-grid" id="mappingDetectGrid"></div>
-            <div class="actions" style="border-top:none; padding-top:6px;">
-              <button id="applyMappingDetectBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
+          <!-- Profile Identity -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Profile Identity</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <div class="grid">
+                <label>
+                  Profile Name
+                  <span class="field-hint">Unique name for this billing configuration.</span>
+                  <input id="name" type="text" placeholder="e.g., monthly_bills_q1" />
+                </label>
+              </div>
             </div>
+          </details>
+          <!-- Google Sheet Data Source -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Google Sheet Data Source</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <div class="grid">
+                <label>
+                  Spreadsheet ID
+                  <span class="field-hint">The ID from your Google Sheets URL.</span>
+                  <input id="spreadsheet_id" type="text" placeholder="1a2b3c..." />
+                </label>
+                <label>
+                  Sheet Name
+                  <span class="field-hint">The tab name inside the spreadsheet (e.g., "Invoices").</span>
+                  <input id="sheet_name" type="text" placeholder="Sheet1" />
+                </label>
+                <label>
+                  Sheet Range
+                  <span class="field-hint">Cell range to read. Leave as A1:ZZ to scan all columns.</span>
+                  <input id="sheet_range" type="text" placeholder="A1:ZZ" />
+                </label>
+                <label>
+                  Header Row
+                  <span class="field-hint">Row number containing column headers (usually 1).</span>
+                  <input id="header_row_index" type="number" min="1" placeholder="1" />
+                </label>
+                <label>
+                  Data Starts At Row
+                  <span class="field-hint">First row of actual billing data (usually 2).</span>
+                  <input id="data_start_row_index" type="number" min="1" placeholder="2" />
+                </label>
+                <label>
+                  Max Rows (optional)
+                  <span class="field-hint">Limit rows processed. Leave blank for all.</span>
+                  <input id="max_rows" type="number" min="1" placeholder="Unlimited" />
+                </label>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:8px;">
+                <button id="detectColumnsBtn" type="button">Detect Columns</button>
+              </div>
+
+              <div id="detectResult" class="detect-panel hidden">
+                <h4>Detected Columns</h4>
+                <div class="detect-grid" id="detectGrid"></div>
+                <div class="actions" style="border-top:none; padding-top:6px;">
+                  <button id="applyMappingBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <!-- Template & Destination -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Template &amp; Destination</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <div class="grid">
+                <label>
+                  Slide Template ID
+                  <span class="field-hint">Google Slides presentation ID used as the bill template.</span>
+                  <input id="template_presentation_id" type="text" placeholder="1x2y3z..." />
+                </label>
+                <label>
+                  Destination Folder ID
+                  <span class="field-hint">Google Drive folder ID where generated slides are saved.</span>
+                  <input id="destination_folder_id" type="text" placeholder="Optional — leave blank for root" />
+                </label>
+                <label>
+                  Output Format
+                  <span class="field-hint">What to generate: slide images, PDF, or both.</span>
+                  <select id="output_format">
+                    <option value="both">Both (Images + PDF)</option>
+                    <option value="images">Images only</option>
+                    <option value="pdf">PDF only</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <!-- Export Options -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Export Options</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <div class="checkboxes">
+                <label>
+                  <input id="create_run_output_folder" type="checkbox" />
+                  <span>Create a dated folder for each export run</span>
+                </label>
+                <label>
+                  <input id="split_outputs_by_row" type="checkbox" />
+                  <span>Save each bill in its own subfolder</span>
+                </label>
+                <label>
+                  <input id="delete_generated_slides_after_export" type="checkbox" />
+                  <span>Delete generated Google Slides after export</span>
+                </label>
+                <label>
+                  <input id="skip_export_if_zero_or_empty" type="checkbox" />
+                  <span>Skip rows where bill value is zero or empty</span>
+                </label>
+                <label>
+                  <input id="export_selected_rows_only" type="checkbox" />
+                  <span>Only export rows selected in the client portal</span>
+                </label>
+              </div>
+            </div>
+          </details>
+          <!-- Zalo notifications (this profile) -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Zalo notifications <span class="badge info">this profile</span></span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <p class="hint">After a bill is exported it is uploaded to the Drive folder and the tenant is notified on Zalo. The delivery provider is chosen in Settings → Zalo delivery. Needs the phone column in the sheet.</p>
+              <label class="checkbox-inline"><input id="zalo_enabled" type="checkbox" /> Send each bill to the tenant's Zalo after export</label>
+              <label class="checkbox-inline"><input id="zalo_resend_already_sent" type="checkbox" /> Resend even if this month's bill was already sent</label>
+              <div class="grid" style="margin-top:12px;">
+                <label>Phone column<input id="zalo_phone_column" type="text" placeholder="SĐT (empty = auto-detect)" /></label>
+                <label>Zalo template id<input id="zalo_template_id" type="text" placeholder="template_id approved by Zalo" /></label>
+                <label>Link placeholder name<input id="zalo_link_field" type="text" placeholder="link" /></label>
+                <label>Drive folder for bills<input id="zalo_drive_folder_id" type="text" placeholder="Drive folder id" /></label>
+              </div>
+              <label style="margin-top:10px;">Template field map — template parameter to sheet column, a {{token}} or a literal
+                <textarea id="zalo_field_map" rows="3" placeholder='{"customer":"Tên","room":"{{room}}","amount":"Tổng","link":"{{link}}"}'></textarea>
+              </label>
+
+              <div id="zaloBotMessageWrap">
+                <label style="margin-top:10px;">Bot message — what the tenant receives on Zalo
+                  <span class="field-hint">Blank uses the built-in default. Click a token below to insert it at the cursor, or type any sheet column name. A line whose value is empty is dropped automatically.</span>
+                  <textarea id="zalo_bot_message_template" rows="7" placeholder="🧾 HÓA ĐƠN THANH TOÁN&#10;Cơ sở: {{profile}}&#10;Phòng: {{room}}&#10;Kỳ: {{period}}&#10;Số tiền: {{total}}&#10;&#10;Xem hóa đơn: {{link}}"></textarea>
+                </label>
+
+                <div class="actions" style="border-top:none; padding-top:6px;">
+                  <button id="zaloMessagePreviewBtn" type="button" class="primary">Preview message &amp; load tokens</button>
+                  <button id="zaloMessageDefaultBtn" type="button">Insert default template</button>
+                  <button id="zaloMessageClearBtn" type="button">Clear (use default)</button>
+                  <span id="zaloMessageStatus" class="muted"></span>
+                </div>
+
+                <div style="margin-top:8px;">
+                  <div class="field-hint" style="margin-bottom:4px;">Built-in tokens — work in every profile</div>
+                  <div class="token-row" id="zaloBuiltinTokenRow"></div>
+                </div>
+
+                <div id="zaloSheetTokensWrap" class="hidden" style="margin-top:8px;">
+                  <div class="field-hint" style="margin-bottom:4px;">Sheet columns — click to insert</div>
+                  <div class="token-row" id="zaloSheetTokenRow"></div>
+                </div>
+
+                <label class="checkbox-inline" style="margin-top:10px;"><input id="zalo_bot_send_photo" type="checkbox" /> Attach the bill image as a photo too (bot provider, images only)</label>
+
+                <div id="zaloMessagePreviewWrap" class="hidden" style="margin-top:8px;">
+                  <div class="field-hint" style="margin-bottom:4px;">Preview — exactly what the tenant receives, for <span id="zaloPreviewRowLabel"></span></div>
+                  <pre class="log-console" id="zaloMessagePreview" style="max-height:260px;"></pre>
+                </div>
+              </div>
+            </div>
+          </details>
+          <!-- Advanced Settings -->
+          <fieldset class="form-section advanced-section">
+            <legend class="advanced-toggle" id="advancedToggle">
+              <span>Advanced Settings</span>
+              <span class="toggle-icon">▸</span>
+            </legend>
+            <div class="advanced-body hidden" id="advancedBody">
+              <div class="grid cols-3">
+                <label>
+                  Copy Name Template
+                  <span class="field-hint">Name pattern for copied slide files.</span>
+                  <input id="copy_name_template" type="text" />
+                </label>
+                <label>
+                  Run Folder Template
+                  <span class="field-hint">Name pattern for export run folders.</span>
+                  <input id="run_folder_name_template" type="text" />
+                </label>
+                <label>
+                  Output File Template
+                  <span class="field-hint">Name pattern for exported files.</span>
+                  <input id="output_file_name_template" type="text" />
+                </label>
+              </div>
+
+              <div class="grid cols-3" style="margin-top:12px;">
+                <label>
+                  Output Directory
+                  <span class="field-hint">Local folder path for downloads.</span>
+                  <input id="output_dir" type="text" />
+                </label>
+                <label>
+                  Credentials File
+                  <span class="field-hint">Path to Google service account JSON.</span>
+                  <input id="credentials_file" type="text" placeholder="Optional" />
+                </label>
+                <label>
+                  Token File
+                  <span class="field-hint">Path to OAuth token cache.</span>
+                  <input id="token_file" type="text" />
+                </label>
+              </div>
+
+              <div class="grid cols-3" style="margin-top:12px;">
+                <label>
+                  Placeholder Strategy
+                  <span class="field-hint">How sheet columns map to slide placeholders.</span>
+                  <select id="placeholder_strategy">
+                    <option value="mapping_with_fallback">Mapping with fallback</option>
+                    <option value="header_braces">Header braces</option>
+                    <option value="mapping_only">Mapping only</option>
+                  </select>
+                </label>
+                <label>
+                  Reference Strategy
+                  <span class="field-hint">How cell values are matched to template references.</span>
+                  <select id="reference_strategy">
+                    <option value="identity">Identity</option>
+                    <option value="strip_whitespace">Strip whitespace</option>
+                    <option value="strip_currency">Strip currency</option>
+                    <option value="template_map">Template map</option>
+                  </select>
+                </label>
+                <label>
+                  Skip Check Column
+                  <span class="field-hint">Column name to check for zero/empty skip.</span>
+                  <input id="skip_zero_or_empty_column" type="text" placeholder="Optional" />
+                </label>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:6px;">
+                <button id="detectMappingsBtn" type="button">Auto-Match Headers ↔ Placeholders</button>
+              </div>
+              <div id="mappingDetectResult" class="detect-panel hidden">
+                <h4>Detected Mappings</h4>
+                <div class="detect-grid" id="mappingDetectGrid"></div>
+                <div class="actions" style="border-top:none; padding-top:6px;">
+                  <button id="applyMappingDetectBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
+                </div>
+              </div>
+
+              <div class="json-grid" style="margin-top:12px;">
+                <label>
+                  Placeholder Mapping JSON
+                  <span class="field-hint">Custom column-to-placeholder mappings.</span>
+                  <textarea id="placeholder_mapping" rows="6">{}</textarea>
+                </label>
+                <label>
+                  Reference Mapping JSON
+                  <span class="field-hint">Custom value-to-reference mappings.</span>
+                  <textarea id="reference_mapping" rows="6">{}</textarea>
+                </label>
+              </div>
+
+              <label style="margin-top:10px;">
+                Selected Sheet Rows
+                <span class="field-hint">Read-only list of rows selected in the client portal.</span>
+                <input id="selected_sheet_rows" type="text" disabled />
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Row Selection -->
+          <fieldset class="form-section" id="adminRowPanel" style="display:none;">
+            <legend>Row Selection</legend>
+            <p id="adminRowSummary" class="editor-hint"></p>
+            <div class="table-wrap large">
+              <table id="adminRowTable"></table>
+            </div>
+            <div class="actions" style="border-top:none; padding-top:8px;">
+              <button id="adminSelectAllBtn" type="button">Select All</button>
+              <button id="adminClearBtn" type="button">Clear</button>
+            </div>
+            <div id="adminSelectionSummary" class="selection-summary"></div>
+          </fieldset>
+
+          <!-- Sticky action bar -->
+          <div class="sticky-actions">
+            <span id="profileDirtyBadge" class="dirty-badge"></span>
+            <span class="spacer"></span>
+            <button id="previewBillsBtn">Preview Bills</button>
+            <button id="runExportBtn" class="primary">Run Export</button>
+            <button id="saveProfileBtn" class="primary">Save Profile</button>
           </div>
+        </section>
+      </main>
+      <!-- ===================== Settings view ===================== -->
+      <main id="settingsView" class="admin-layout hidden" style="grid-template-columns:minmax(0,1fr);">
+        <section class="panel editor">
+          <h2>Settings</h2>
+          <p class="editor-hint">Company-wide configuration: data backup, Google credentials, and Zalo delivery.</p>
 
-          <div class="json-grid">
-            <label>
-              Placeholder Mapping JSON
-              <span class="field-hint">Custom column-to-placeholder mappings.</span>
-              <textarea id="placeholder_mapping" rows="6">{}</textarea>
-            </label>
-            <label>
-              Reference Mapping JSON
-              <span class="field-hint">Custom value-to-reference mappings.</span>
-              <textarea id="reference_mapping" rows="6">{}</textarea>
-            </label>
+          <!-- Database Backup & Restore -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Database Backup &amp; Restore</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <p class="hint">Upload or download your <code>users.json</code> and profile JSON files. Use this to migrate data between servers or create backups.</p>
+              <div class="grid">
+                <label>
+                  users.json
+                  <input id="dbUsersFile" type="file" accept=".json" />
+                </label>
+                <label>
+                  Profile JSONs
+                  <input id="dbProfileFiles" type="file" accept=".json" multiple />
+                </label>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:8px;">
+                <button id="uploadDatabaseBtn" type="button" class="primary">Upload Database</button>
+                <span id="dbUploadStatus" class="muted"></span>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:8px;">
+                <button id="downloadUsersBtn" type="button">Download Users (users.json)</button>
+                <button id="downloadProfilesBtn" type="button">Download Profiles (zip)</button>
+                <button id="downloadDatabaseBtn" type="button" class="primary">Download Full Database (zip)</button>
+              </div>
+            </div>
+          </details>
+
+          <!-- Upload Credentials -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Google Credentials</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <p class="hint">Upload your Google OAuth credential file and token file so profiles can authenticate with Google APIs.</p>
+              <div class="grid">
+                <label>
+                  Credentials JSON (client_secret_*.json)
+                  <input id="credFile" type="file" accept=".json" />
+                </label>
+                <label>
+                  Token JSON (*.apps.googleusercontent.com.json)
+                  <input id="tokenFile" type="file" accept=".json" />
+                </label>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:8px;">
+                <button id="uploadCredentialsBtn" type="button" class="primary">Upload Credentials</button>
+                <span id="credUploadStatus" class="muted"></span>
+              </div>
+              <p class="hint" style="margin-top:8px;">
+                After uploading, set <strong>credentials_file</strong> to <code>/app/google_credentials.json</code> and <strong>token_file</strong> to <code>/app/google_token.json</code> in your profiles.
+              </p>
+            </div>
+          </details>
+          <!-- Zalo delivery (global) -->
+          <details class="section-card" open>
+            <summary>
+              <span class="section-title">Zalo delivery <span class="badge info">global</span></span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <p class="hint">One Zalo identity for the whole company. Tokens live in <code>zalo_config.json</code> (outside the profile, never committed to git). Pick the provider, then fill in the matching credentials.</p>
+              <div class="grid">
+                <label>Provider
+                  <span class="field-hint">ZNS template by phone number, or Bot Platform chat message.</span>
+                  <select id="zaloProvider">
+                    <option value="oa">Zalo Official Account / ZNS (template by phone)</option>
+                    <option value="bot">Zalo Bot Platform (chat message)</option>
+                  </select>
+                </label>
+              </div>
+
+              <div id="zaloOaFields">
+                <div class="grid" style="margin-top:12px;">
+                  <label>OA access token<input id="zaloAccessToken" type="password" placeholder="paste the OA access token" /></label>
+                  <label>OA id (optional)<input id="zalo_oa_id" type="text" placeholder="e.g. 1234567890" /></label>
+                </div>
+              </div>
+
+              <div id="zaloBotFields">
+                <div class="grid" style="margin-top:12px;">
+                  <label>Bot token
+                    <span class="field-hint">Zalo Bot Manager sends it as &lt;id&gt;:&lt;secret&gt;.</span>
+                    <input id="zaloBotToken" type="password" placeholder="3576164315943503983:UxJIJ..." />
+                  </label>
+                  <label>Bot account
+                    <span class="field-hint">Filled in by "Verify bot token".</span>
+                    <input id="zaloBotAccount" type="text" readonly placeholder="not verified yet" />
+                  </label>
+                </div>
+                <label class="checkbox-inline" style="margin-top:10px;">
+                  <input id="zaloBotAutoReply" type="checkbox" /> Reply automatically so a tenant can link their phone
+                </label>
+                <label class="checkbox-inline">
+                  <input id="zaloPreferFreeBot" type="checkbox" /> Use the free bot chat when a tenant has one, instead of a paid ZNS template
+                </label>
+                <label class="checkbox-inline">
+                  <input id="zaloZnsFallback" type="checkbox" /> Fall back to a ZNS template when a tenant has never opened the bot
+                </label>
+                <p class="hint" style="margin:8px 0 0;">
+                  A bot can only message a chat that already exists, so a tenant who has never opened the bot
+                  cannot receive a bot message at all. <strong>ZBS Template Message</strong> is the only channel that
+                  reaches someone who has not interacted with you: it is addressed by phone number, needs a
+                  Zalo-approved template id and is billed per message. Leave the fallback off until you have an
+                  OA access token and an approved template.
+                </p>
+                <div class="actions" style="border-top:none; padding-top:6px;">
+                  <button id="zaloBotVerifyBtn" type="button">Verify bot token</button>
+                  <button id="zaloBotPollBtn" type="button">Poll inbox now (5s)</button>
+                  <button id="zaloBotWebhookInfoBtn" type="button">Webhook info</button>
+                  <span id="zaloBotHint" class="muted"></span>
+                </div>
+                <p class="hint" style="margin:6px 0 0;">
+                  Tenants must open the bot once and send the phone number on their bill before a bill can be delivered
+                  (Zalo only allows a bot to message a chat that already exists).
+                  Share link: <a id="zaloBotShareLink" href="#" target="_blank" rel="noopener">-</a>
+                </p>
+                <div id="zaloSubscribersWrap" style="margin-top:8px;">
+                  <div class="table-wrap" style="max-height:200px;">
+                    <table class="data-table" id="zaloSubscribersTable" style="font-size:12px;">
+                      <thead>
+                        <tr><th>Chat</th><th>Name</th><th>Phone</th><th>Linked</th><th>Msgs</th><th></th></tr>
+                      </thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                  <p class="hint" id="zaloSubscribersEmpty" style="margin:6px 0 0;">No tenant has messaged the bot yet.</p>
+                </div>
+              </div>
+              <label class="checkbox-inline" style="margin-top:10px;">
+                <input id="zaloDryRun" type="checkbox" /> Dry-run: build and log every message, never send
+              </label>
+              <div class="actions" style="border-top:none; padding-top:8px;">
+                <button id="zaloSaveConfigBtn" type="button" class="primary">Save Zalo settings</button>
+                <button id="zaloVerifyDriveBtn" type="button">Verify Drive folder</button>
+                <span id="zaloStatus" class="muted"></span>
+              </div>
+              <div class="grid" style="margin-top:12px;">
+                <label>Test phone number<input id="zaloTestPhone" type="text" placeholder="0987654321" /></label>
+                <label>Test chat id (bot)
+                  <span class="field-hint">Leave blank to use the phone above, which must already be linked.</span>
+                  <input id="zaloTestChatId" type="text" placeholder="6ede9afa66b88fe6d6a9" />
+                </label>
+              </div>
+              <div class="actions" style="border-top:none; padding-top:4px;">
+                <button id="zaloTestSendBtn" type="button">Test message (dry-run)</button>
+                <button id="zaloTestSendLiveBtn" type="button" class="danger">Send test for real</button>
+                <button id="zaloBotSendTestBtn" type="button">Send bot test for real</button>
+                <button id="zaloTestRowBtn" type="button">Build from sheet row</button>
+              </div>
+              <pre class="log-console" id="zaloResult" style="display:none; max-height:220px;"></pre>
+            </div>
+          </details>
+
+          <!-- Activity Log -->
+          <details class="section-card">
+            <summary>
+              <span class="section-title">Activity Log</span>
+              <span class="section-chevron">&#9662;</span>
+            </summary>
+            <div class="section-body">
+              <p class="hint">Every admin action appends a line here, including Zalo Bot polling, verification and test sends.</p>
+              <div class="actions" style="border-top:none; padding-top:0;">
+                <button id="clearLogBtn" type="button">Clear log</button>
+              </div>
+              <pre class="log-console" id="logOutput"></pre>
+            </div>
+          </details>
+        </section>
+      </main>
+      <!-- ===================== Accounts view ===================== -->
+      <main id="accountsView" class="admin-layout hidden">
+        <aside class="panel sidebar-list">
+          <h3>Accounts</h3>
+          <div class="row">
+            <select id="accountSelect" size="12"></select>
           </div>
+          <div class="actions">
+            <button id="newAccountBtn">New</button>
+            <button id="deleteAccountBtn" class="danger">Delete</button>
+            <button id="refreshAccountsBtn">Refresh</button>
+          </div>
+        </aside>
 
-          <label style="margin-top:10px;">
-            Selected Sheet Rows
-            <span class="field-hint">Read-only list of rows selected in the client portal.</span>
-            <input id="selected_sheet_rows" type="text" disabled />
-          </label>
-        </div>
-      </fieldset>
+        <section class="panel editor">
+          <h2>Account Settings</h2>
 
-      <!-- Row Selection -->
-      <fieldset class="form-section" id="adminRowPanel" style="display:none;">
-        <legend>Row Selection</legend>
-        <p id="adminRowSummary" class="editor-hint"></p>
-        <div class="table-wrap large">
-          <table id="adminRowTable"></table>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:8px;">
-          <button id="adminSelectAllBtn" type="button">Select All</button>
-          <button id="adminClearBtn" type="button">Clear</button>
-        </div>
-        <div id="adminSelectionSummary" class="selection-summary"></div>
-      </fieldset>
+          <fieldset class="form-section">
+            <legend>Change My Password</legend>
+            <div class="grid">
+              <label>Current Password<input id="my_curr_password" type="password" /></label>
+              <label>New Password<input id="my_new_password" type="password" /></label>
+            </div>
+            <div class="actions" style="border-top:none; padding-top:8px;">
+              <button id="changeMyPasswordBtn" class="primary">Change Password</button>
+            </div>
+          </fieldset>
 
-      <div class="actions">
-        <button id="saveProfileBtn" class="primary">Save Profile</button>
-        <button id="previewBillsBtn">Preview Bills</button>
-        <button id="runExportBtn" class="primary">Run Export</button>
-      </div>
-    </section>
-  </main>
+          <fieldset class="form-section">
+            <legend>Manage Accounts</legend>
+            <div class="grid">
+              <label>Username<input id="acc_username" type="text" /></label>
+              <label>Password<input id="acc_password" type="password" placeholder="Leave blank to keep current" /></label>
+              <label>Role
+                <select id="acc_role">
+                  <option value="client">Client</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
+            </div>
 
-  <!-- Accounts View -->
-  <main id="accountsView" class="admin-layout hidden">
-    <aside class="panel sidebar">
-      <h2>Accounts</h2>
-      <div class="row">
-        <select id="accountSelect" size="10"></select>
-      </div>
-      <div class="actions">
-        <button id="newAccountBtn">New</button>
-        <button id="deleteAccountBtn" class="danger">Delete</button>
-        <button id="refreshAccountsBtn">Refresh</button>
-      </div>
-    </aside>
+            <div class="panel" style="margin-top: 10px;">
+              <h3 style="margin: 0 0 8px; font-size: 14px;">Allowed Profiles</h3>
+              <p class="hint" style="margin: 0 0 8px;">Check profiles this account can access. "All profiles" gives unrestricted access.</p>
+              <label class="checkbox-inline">
+                <input id="acc_all_profiles" type="checkbox" /> All profiles (unrestricted)
+              </label>
+              <div id="accProfileList" class="profile-checklist"></div>
+            </div>
 
-    <section class="panel editor">
-      <h2>Account Settings</h2>
+            <div class="actions">
+              <button id="saveAccountBtn" class="primary">Save Account</button>
+            </div>
+          </fieldset>
+        </section>
+      </main>
 
-      <fieldset class="form-section">
-        <legend>Change My Password</legend>
-        <div class="grid">
-          <label>Current Password<input id="my_curr_password" type="password" /></label>
-          <label>New Password<input id="my_new_password" type="password" /></label>
-        </div>
-        <div class="actions" style="border-top:none; padding-top:8px;">
-          <button id="changeMyPasswordBtn" class="primary">Change Password</button>
-        </div>
-      </fieldset>
-
-      <fieldset class="form-section">
-        <legend>Manage Accounts</legend>
-        <div class="grid">
-          <label>Username<input id="acc_username" type="text" /></label>
-          <label>Password<input id="acc_password" type="password" placeholder="Leave blank to keep current" /></label>
-          <label>Role
-            <select id="acc_role">
-              <option value="client">Client</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="panel" style="margin-top: 10px;">
-          <h3 style="margin: 0 0 8px; font-size: 14px;">Allowed Profiles</h3>
-          <p class="hint" style="margin: 0 0 8px;">Check profiles this account can access. "All profiles" gives unrestricted access.</p>
-          <label class="checkbox-inline">
-            <input id="acc_all_profiles" type="checkbox" /> All profiles (unrestricted)
-          </label>
-          <div id="accProfileList" class="profile-checklist"></div>
-        </div>
-
-        <div class="actions">
-          <button id="saveAccountBtn" class="primary">Save Account</button>
-        </div>
-      </fieldset>
-    </section>
-    <!-- Admin log: log() in app.js appends every action here -->
-    <section class="panel editor">
-      <h2>Log</h2>
-      <p class="editor-hint">Every admin action appends a line here, including Zalo Bot polling, verification and test sends.</p>
-      <div class="actions" style="border-top:none; padding-top:0;">
-        <button id="clearLogBtn" type="button">Clear log</button>
-      </div>
-      <pre id="logOutput" style="max-height:240px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; margin:0;"></pre>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <!-- Loading Overlay -->
   <div id="loadingOverlay" class="loading-overlay hidden">
@@ -543,7 +612,6 @@
       <p id="loadingText">Working...</p>
     </div>
   </div>
-
   <div id="previewModal" class="modal hidden">
     <div class="modal-content wide">
       <div class="modal-header">
@@ -588,3 +656,12 @@
   <script src="/admin/app.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
