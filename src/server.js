@@ -41,7 +41,10 @@ const {
   isBotConfigured,
   buildBotMessage,
   extractPhoneFromText,
-  ingestBotUpdate
+  ingestBotUpdate,
+  DEFAULT_BOT_MESSAGE_TEMPLATE,
+  DISCOVERABLE_MESSAGE_TOKENS,
+  MESSAGE_TOTAL_ALIASES
 } = require('./zaloService');
 const {
   maskBotToken,
@@ -964,6 +967,80 @@ app.post('/api/zalo/bot/send-test', requireRole('admin'), async (req, res) => {
     res.json({ ok: true, live: true, chat_id: chatId, text, result: sent, logs: logger.dump() });
   } catch (error) {
     res.status(400).json({ error: String(error.message || error), logs: logger.dump() });
+  }
+});
+
+// Render the Zalo bot message for the profile as it currently appears in the form,
+// WITHOUT saving or sending anything. This is what makes {{placeholder}} tokens
+// discoverable: it returns the real header names from the sheet so the admin can pick
+// them instead of guessing, plus the message exactly as a tenant would receive it.
+app.post('/api/zalo/message-preview', requireRole('admin'), async (req, res) => {
+  const logger = collectLogger();
+  try {
+    const body = req.body || {};
+    const incoming = body.profile && typeof body.profile === 'object' ? body.profile : null;
+    if (!incoming || !String(incoming.name || '').trim()) {
+      return res.status(400).json({ error: 'A profile (with a name) is required.' });
+    }
+    const profile = validateProfile(normalizeProfile({ ...incoming }));
+
+    // The sheet is read with the SAVED profile's credentials, but rendered with the
+    // UNSAVED form values, so a token or template edit can be previewed before saving.
+    const check = loadProfileForReport(req, profile.name);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const { sheets } = await createGoogleClients(check.profile);
+    const values = await readSheetValues(sheets, check.profile);
+    const records = buildRowRecords(values, check.profile);
+    if (!records.length) {
+      return res.status(400).json({ error: 'The sheet returned no rows to preview a message from.' });
+    }
+
+    const headers = Object.keys(records[0].data || {});
+    const wanted = Number(body.sheet_row || 0);
+    const record = wanted ? records.find((r) => Number(r.sheet_row) === wanted) : records[0];
+    if (!record) return res.status(400).json({ error: `sheet_row ${wanted} was not found.` });
+
+    const extra = {
+      phone_column: profile.zalo_phone_column
+        ? (resolveColumnName(headers, profile.zalo_phone_column) || '')
+        : (inferPhoneColumn(headers) || ''),
+      room_column: inferRoomColumn(headers) || '',
+      bill_column: inferSkipColumn(headers) || '',
+      period: new Date().toISOString().slice(0, 7)
+    };
+
+    // A stand-in link, so the preview never implies a real Drive file exists.
+    const sampleLink = 'https://drive.google.com/file/d/SAMPLE-BILL-ID/view';
+    const text = buildBotMessage({ profile, record, link: sampleLink, extra });
+
+    // Which tokens actually produced a value for this row, so the UI can flag dead ones.
+    const used = DISCOVERABLE_MESSAGE_TOKENS.map((token) => ({
+      token,
+      in_template: String(profile.zalo_bot_message_template || DEFAULT_BOT_MESSAGE_TEMPLATE).includes(`{{${token}}}`)
+    }));
+
+    res.json({
+      ok: true,
+      text,
+      chars: text.length,
+      headers,
+      builtin_tokens: DISCOVERABLE_MESSAGE_TOKENS,
+      total_aliases: MESSAGE_TOTAL_ALIASES,
+      default_template: DEFAULT_BOT_MESSAGE_TEMPLATE,
+      using_default_template: !String(profile.zalo_bot_message_template || '').trim(),
+      detected: {
+        phone_column: extra.phone_column,
+        room_column: extra.room_column,
+        bill_column: extra.bill_column
+      },
+      row: { sheet_row: record.sheet_row, data: record.data },
+      row_count: records.length,
+      tokens: used,
+      logs: logger.dump()
+    });
+  } catch (error) {
+    res.status(error.status || 400).json({ error: String(error.message || error), logs: logger.dump() });
   }
 });
 

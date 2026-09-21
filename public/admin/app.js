@@ -117,6 +117,17 @@ const els = {
   zaloSubscribersTable: document.getElementById('zaloSubscribersTable'),
   zaloSubscribersEmpty: document.getElementById('zaloSubscribersEmpty'),
   zaloBotMessageWrap: document.getElementById('zaloBotMessageWrap'),
+  zaloBotMessageTemplate: document.getElementById('zalo_bot_message_template'),
+  zaloBuiltinTokenRow: document.getElementById('zaloBuiltinTokenRow'),
+  zaloSheetTokenRow: document.getElementById('zaloSheetTokenRow'),
+  zaloSheetTokensWrap: document.getElementById('zaloSheetTokensWrap'),
+  zaloMessagePreviewBtn: document.getElementById('zaloMessagePreviewBtn'),
+  zaloMessageDefaultBtn: document.getElementById('zaloMessageDefaultBtn'),
+  zaloMessageClearBtn: document.getElementById('zaloMessageClearBtn'),
+  zaloMessageStatus: document.getElementById('zaloMessageStatus'),
+  zaloMessagePreviewWrap: document.getElementById('zaloMessagePreviewWrap'),
+  zaloMessagePreview: document.getElementById('zaloMessagePreview'),
+  zaloPreviewRowLabel: document.getElementById('zaloPreviewRowLabel'),
   clearLogBtn: document.getElementById('clearLogBtn')
 };
 
@@ -1429,6 +1440,110 @@ async function sendZaloTemplate(live) {
   }
 }
 
+/* ---------- Zalo bot message: {{token}} picker + live preview ---------- */
+
+// Mirrors DISCOVERABLE_MESSAGE_TOKENS in src/zaloService.js. It is drawn immediately so
+// the panel is never empty, then refreshed from the server response (the real list).
+const ZALO_BUILTIN_TOKENS = ['profile', 'room', 'period', 'total', 'date', 'link', 'sheet_row', 'phone'];
+let zaloDefaultTemplate = '';
+
+// Insert {{token}} at the caret, keeping focus so the admin can keep typing.
+function insertZaloToken(token) {
+  const el = els.zaloBotMessageTemplate;
+  if (!el) return;
+  const snippet = `{{${token}}}`;
+  const start = el.selectionStart == null ? el.value.length : el.selectionStart;
+  const end = el.selectionEnd == null ? start : el.selectionEnd;
+  el.value = el.value.slice(0, start) + snippet + el.value.slice(end);
+  const caret = start + snippet.length;
+  el.focus();
+  if (el.setSelectionRange) el.setSelectionRange(caret, caret);
+}
+
+function renderZaloTokenRow(container, tokens, isColumn) {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!tokens.length) {
+    container.innerHTML = '<span class="muted">none</span>';
+    return;
+  }
+  tokens.forEach((item) => {
+    const token = typeof item === 'string' ? item : item.token;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `token-chip${isColumn ? ' is-column' : ''}`;
+    button.textContent = `{{${token}}}`;
+    if (isColumn) {
+      button.title = `Sheet column: ${token}`;
+    } else if (typeof item === 'object' && item.in_template === false) {
+      button.classList.add('is-unused');
+      button.title = 'Not used in the current template';
+    }
+    button.addEventListener('click', () => insertZaloToken(token));
+    container.appendChild(button);
+  });
+}
+
+function renderZaloMessagePreview(body) {
+  if (els.zaloMessagePreview) els.zaloMessagePreview.textContent = body.text || '(empty)';
+  if (els.zaloPreviewRowLabel) {
+    els.zaloPreviewRowLabel.textContent = body.row ? `sheet row ${body.row.sheet_row}` : 'the first row';
+  }
+  if (els.zaloMessagePreviewWrap) els.zaloMessagePreviewWrap.classList.remove('hidden');
+  if (els.zaloMessageStatus) {
+    const bits = [`${body.chars} chars`];
+    if (body.using_default_template) bits.push('using the built-in default');
+    if (body.detected && body.detected.phone_column) bits.push(`phone: ${body.detected.phone_column}`);
+    if (body.detected && body.detected.room_column) bits.push(`room: ${body.detected.room_column}`);
+    els.zaloMessageStatus.textContent = bits.join(' · ');
+  }
+  if (Array.isArray(body.builtin_tokens) && body.builtin_tokens.length) {
+    renderZaloTokenRow(els.zaloBuiltinTokenRow, body.builtin_tokens, false);
+  }
+  if (body.headers && body.headers.length) {
+    renderZaloTokenRow(els.zaloSheetTokenRow, body.headers, true);
+    if (els.zaloSheetTokensWrap) els.zaloSheetTokensWrap.classList.remove('hidden');
+  }
+  if (body.default_template) zaloDefaultTemplate = body.default_template;
+}
+
+// Reads the sheet through the server, so the sheet-column tokens are the REAL header
+// names, and renders the message exactly as a tenant would receive it.
+async function loadZaloMessagePreview() {
+  const profile = buildProfileFromForm();
+  if (!profile.name) {
+    return alert('Choose or name a profile first.');
+  }
+  try {
+    showLoading('Reading the sheet and rendering the message...');
+    const body = await api('/api/zalo/message-preview', {
+      method: 'POST',
+      body: JSON.stringify({ profile, sheet_row: 0 })
+    });
+    (body.logs || []).forEach(log);
+    renderZaloMessagePreview(body);
+    log(`Zalo message preview rendered from ${(body.headers || []).length} sheet column(s).`);
+  } catch (error) {
+    if (els.zaloMessageStatus) els.zaloMessageStatus.textContent = `Preview failed: ${error.message}`;
+    log(`Zalo message preview failed: ${error.message}`);
+  } finally {
+    hideLoading();
+  }
+}
+
+function useZaloDefaultTemplate() {
+  if (!zaloDefaultTemplate) {
+    return alert('Run "Preview message & load tokens" first, so the built-in default is available.');
+  }
+  if (els.zaloBotMessageTemplate) els.zaloBotMessageTemplate.value = zaloDefaultTemplate;
+  log('Inserted the built-in default message template.');
+}
+
+function clearZaloMessageTemplate() {
+  if (els.zaloBotMessageTemplate) els.zaloBotMessageTemplate.value = '';
+  if (els.zaloMessageStatus) els.zaloMessageStatus.textContent = 'cleared - the built-in default will be used';
+}
+
 async function init() {
   clearLog();
   await checkSession();
@@ -1444,6 +1559,11 @@ async function init() {
   if (els.zaloBotWebhookInfoBtn) els.zaloBotWebhookInfoBtn.addEventListener('click', checkZaloWebhook);
   if (els.zaloBotSendTestBtn) els.zaloBotSendTestBtn.addEventListener('click', () => sendZaloBotTest(true));
   if (els.zaloTestRowBtn) els.zaloTestRowBtn.addEventListener('click', () => sendZaloBotTest(false));
+  // Zalo bot message: token picker + preview
+  if (els.zaloMessagePreviewBtn) els.zaloMessagePreviewBtn.addEventListener('click', loadZaloMessagePreview);
+  if (els.zaloMessageDefaultBtn) els.zaloMessageDefaultBtn.addEventListener('click', useZaloDefaultTemplate);
+  if (els.zaloMessageClearBtn) els.zaloMessageClearBtn.addEventListener('click', clearZaloMessageTemplate);
+  renderZaloTokenRow(els.zaloBuiltinTokenRow, ZALO_BUILTIN_TOKENS, false);
   if (els.clearLogBtn) els.clearLogBtn.addEventListener('click', clearLog);
   if (els.zaloProvider) {
     els.zaloProvider.addEventListener('change', () => {

@@ -315,11 +315,34 @@
           <textarea id="zalo_field_map" rows="4" placeholder='{"customer":"Tên","room":"{{room}}","amount":"Tổng","link":"{{link}}"}'></textarea>
         </label>
         <div id="zaloBotMessageWrap">
-          <label>Bot message template — used by the Zalo Bot Platform provider
-            <span class="field-hint">Blank = built-in default. Use {{room}}, {{period}}, {{total}}, {{date}}, {{link}} or any sheet column name. Lines whose value is empty are dropped.</span>
-            <textarea id="zalo_bot_message_template" rows="5" placeholder="HÓA ĐƠN THANH TOÁN&#10;Cơ sở: {{profile}}&#10;Phòng: {{room}}&#10;Số tiền: {{total}}&#10;Xem hóa đơn: {{link}}"></textarea>
+          <label>Bot message — what the tenant receives on Zalo
+            <span class="field-hint">Blank uses the built-in default. Click a token below to insert it at the cursor, or type any sheet column name. A line whose value is empty is dropped automatically.</span>
+            <textarea id="zalo_bot_message_template" rows="7" placeholder="🧾 HÓA ĐƠN THANH TOÁN&#10;Cơ sở: {{profile}}&#10;Phòng: {{room}}&#10;Kỳ: {{period}}&#10;Số tiền: {{total}}&#10;&#10;Xem hóa đơn: {{link}}"></textarea>
           </label>
+
+          <div class="actions" style="border-top:none; padding-top:6px;">
+            <button id="zaloMessagePreviewBtn" type="button" class="primary">Preview message &amp; load tokens</button>
+            <button id="zaloMessageDefaultBtn" type="button">Insert default template</button>
+            <button id="zaloMessageClearBtn" type="button">Clear (use default)</button>
+            <span id="zaloMessageStatus" class="muted"></span>
+          </div>
+
+          <div style="margin-top:8px;">
+            <div class="field-hint" style="margin-bottom:4px;">Built-in tokens — work in every profile</div>
+            <div class="token-row" id="zaloBuiltinTokenRow"></div>
+          </div>
+
+          <div id="zaloSheetTokensWrap" class="hidden" style="margin-top:8px;">
+            <div class="field-hint" style="margin-bottom:4px;">Sheet columns — click to insert</div>
+            <div class="token-row" id="zaloSheetTokenRow"></div>
+          </div>
+
           <label class="checkbox-inline"><input id="zalo_bot_send_photo" type="checkbox" /> Attach the bill image as a photo too (bot provider, images only)</label>
+
+          <div id="zaloMessagePreviewWrap" class="hidden" style="margin-top:8px;">
+            <div class="field-hint" style="margin-bottom:4px;">Preview — exactly what the tenant receives, for <span id="zaloPreviewRowLabel"></span></div>
+            <pre id="zaloMessagePreview" style="max-height:260px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; margin:0;"></pre>
+          </div>
         </div>
       </fieldset>
 

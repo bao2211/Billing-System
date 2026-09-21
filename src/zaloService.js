@@ -134,8 +134,19 @@ const DEFAULT_BOT_MESSAGE_TEMPLATE = [
 ].join('\n');
 
 // Tokens that mean something without a matching sheet column.
+// Keep BUILTIN_MESSAGE_TOKENS in step with the branches inside resolveTemplateValue:
+// a name listed there must resolve natively, or the lookup below would return '' and
+// shadow the sheet-column fallback that follows it.
+const BUILTIN_MESSAGE_TOKENS = ['link', 'profile', 'date', 'period', 'sheet_row', 'room', 'bill', 'phone'];
+// Friendly aliases that map onto the money column, whose name differs per sheet.
+const MESSAGE_TOTAL_ALIASES = ['total', 'amount', 'sotien', 'tong', 'tongcong', 'thanhtien'];
+// What the admin UI offers as clickable tokens: the built-ins worth advertising (minus
+// the internal `bill` skip-column) plus the total alias.
+const DISCOVERABLE_MESSAGE_TOKENS = ['profile', 'room', 'period', 'total', 'date', 'link', 'sheet_row', 'phone'];
+
+// Tokens that mean something without a matching sheet column.
 function resolveMessageTokenName(key) {
-  return ['link', 'profile', 'date', 'period', 'sheet_row', 'room', 'bill', 'phone'].includes(key);
+  return BUILTIN_MESSAGE_TOKENS.includes(key);
 }
 
 // Like resolveTemplateValue, but for a {{token}} embedded in a longer message:
@@ -156,9 +167,8 @@ function resolveMessageToken(key, context) {
   if (match) return String(data[match] ?? '');
 
   // Friendly aliases for the money column, which is named differently per sheet.
-  if (['total', 'amount', 'sotien', 'tong', 'tongcong', 'thanhtien'].includes(folded)) {
-    const totalHeader = headers.find((h) =>
-      ['tongcong', 'tong', 'thanhtien', 'sotien', 'total', 'amount'].includes(foldKey(h)));
+  if (MESSAGE_TOTAL_ALIASES.includes(folded)) {
+    const totalHeader = headers.find((h) => MESSAGE_TOTAL_ALIASES.includes(foldKey(h)));
     if (totalHeader) return String(data[totalHeader] ?? '');
   }
   return '';
@@ -712,6 +722,9 @@ module.exports = {
   OA_MESSAGE_ENDPOINT,
   OA_TOKEN_ENDPOINT,
   DEFAULT_BOT_MESSAGE_TEMPLATE,
+  BUILTIN_MESSAGE_TOKENS,
+  MESSAGE_TOTAL_ALIASES,
+  DISCOVERABLE_MESSAGE_TOKENS,
   normalizePhone,
   maskPhone,
   // ---- Zalo Bot Platform ----

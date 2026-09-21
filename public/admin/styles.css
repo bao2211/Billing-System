@@ -125,6 +125,40 @@ textarea { resize: vertical; }
   font-weight: 400;
 }
 
+/* Zalo message token picker (click a chip to insert {{token}} at the cursor) */
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.token-chip {
+  background: #fff;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.token-chip:hover {
+  background: var(--primary);
+  color: #fff;
+}
+.token-chip.is-column {
+  border-color: var(--line);
+  color: var(--ink);
+}
+.token-chip.is-column:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.token-chip.is-unused {
+  opacity: 0.65;
+}
+
 /* Admin row selection */
 #adminRowTable { width: 100%; border-collapse: collapse; font-size: 13px; }
 #adminRowTable th, #adminRowTable td {
