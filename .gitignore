@@ -4,7 +4,6 @@ downloads
 profiles
 sessions
 users.json
-sheet_slide_export_token.json
 google_credentials.json
 google_token.json
 *.md
@@ -14,9 +13,9 @@ google_token.json
 .env
 _server.*.log
 
-# ---- secrets: never commit these ----
-client_secret_*.json
-.vscode/
+# ---- credentials: intentionally TRACKED in this private repo (requested 2026-09-21) ----
+# client_secret_*.json, .vscode/ and sheet_slide_export_token.json are committed on purpose.
+# If this repository ever becomes public, revoke/rotate them first (GCP -> APIs & Services -> Clients).
 cookies*.txt
 .google_workspace_mcp/
 *.pem
