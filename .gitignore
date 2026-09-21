@@ -20,6 +20,10 @@ cookies*.txt
 .google_workspace_mcp/
 *.pem
 
+# ---- generated Zalo state: global OA token + notification audit log ----
+zalo_config.json
+notifications.json
+
 # ---- report artefacts: contain customer PII and are large binaries ----
 Document/_shots/
 Document/_fig/

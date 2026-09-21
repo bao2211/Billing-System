@@ -93,6 +93,32 @@
         </p>
       </fieldset>
 
+      <!-- Zalo Official Account (global) -->
+      <fieldset class="form-section">
+        <legend>Zalo Official Account (global)</legend>
+        <p class="hint">One OA for the whole company. The access token lives in <code>zalo_config.json</code> (outside the profile, never committed to git). Bills are delivered through a Zalo-approved template, with the bill itself as a Google Drive link.</p>
+        <div class="grid">
+          <label>OA access token<input id="zaloAccessToken" type="password" placeholder="paste the OA access token" /></label>
+          <label>OA id (optional)<input id="zalo_oa_id" type="text" placeholder="e.g. 1234567890" /></label>
+        </div>
+        <label class="checkbox-inline">
+          <input id="zaloDryRun" type="checkbox" /> Dry-run: build and log every message, never send
+        </label>
+        <div class="actions" style="border-top:none; padding-top:8px;">
+          <button id="zaloSaveConfigBtn" type="button" class="primary">Save Zalo settings</button>
+          <button id="zaloVerifyDriveBtn" type="button">Verify Drive folder</button>
+          <span id="zaloStatus" class="muted"></span>
+        </div>
+        <div class="grid">
+          <label>Test phone number<input id="zaloTestPhone" type="text" placeholder="0987654321" /></label>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:4px;">
+          <button id="zaloTestSendBtn" type="button">Test template (dry-run)</button>
+          <button id="zaloTestSendLiveBtn" type="button" class="danger">Send test for real</button>
+        </div>
+        <pre id="zaloResult" style="display:none; max-height:220px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px;"></pre>
+      </fieldset>
+
       <!-- Identity -->
       <fieldset class="form-section">
         <legend>Profile Identity</legend>
@@ -204,6 +230,23 @@
             <span>Only export rows selected in the client portal</span>
           </label>
         </div>
+      </fieldset>
+
+      <!-- Zalo notifications (per profile) -->
+      <fieldset class="form-section">
+        <legend>Zalo notifications (this profile)</legend>
+        <p class="hint">After a bill is exported it is uploaded to the Drive folder and the tenant receives the approved Zalo template with the bill link. Needs the phone column in the sheet.</p>
+        <label class="checkbox-inline"><input id="zalo_enabled" type="checkbox" /> Send each bill to the tenant's Zalo after export</label>
+        <label class="checkbox-inline"><input id="zalo_resend_already_sent" type="checkbox" /> Resend even if this month's bill was already sent</label>
+        <div class="grid">
+          <label>Phone column<input id="zalo_phone_column" type="text" placeholder="SĐT (empty = auto-detect)" /></label>
+          <label>Zalo template id<input id="zalo_template_id" type="text" placeholder="template_id approved by Zalo" /></label>
+          <label>Link placeholder name<input id="zalo_link_field" type="text" placeholder="link" /></label>
+          <label>Drive folder for bills<input id="zalo_drive_folder_id" type="text" placeholder="Drive folder id" /></label>
+        </div>
+        <label>Template field map — template parameter to sheet column, a {{token}} or a literal
+          <textarea id="zalo_field_map" rows="4" placeholder='{"customer":"Tên","room":"{{room}}","amount":"Tổng","link":"{{link}}"}'></textarea>
+        </label>
       </fieldset>
 
       <!-- Advanced Settings (collapsible) -->

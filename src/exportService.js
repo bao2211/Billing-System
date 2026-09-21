@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { google } = require('googleapis');
+const { notifyBill } = require('./zaloService');
+const { loadZaloConfig } = require('./zaloStore');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 
@@ -41,6 +43,14 @@ function defaultProfile() {
     export_selected_rows_only: false,
     selected_sheet_rows: [],
     include_rows_without_room: false,
+    zalo_enabled: false,
+    zalo_phone_column: '',
+    zalo_template_id: '',
+    zalo_link_field: 'link',
+    zalo_field_map: {},
+    zalo_drive_folder_id: '',
+    zalo_skip_if_no_phone: true,
+    zalo_resend_already_sent: false,
     credentials_file: null,
     token_file: './sheet_slide_export_token.json',
     placeholder_strategy: 'mapping_with_fallback',
@@ -91,6 +101,18 @@ function normalizeProfile(raw) {
   profile.skip_zero_or_empty_column = String(profile.skip_zero_or_empty_column || '').trim();
   profile.export_selected_rows_only = toBool(profile.export_selected_rows_only, false);
   profile.include_rows_without_room = toBool(profile.include_rows_without_room, false);
+
+  // ---- Zalo notifications (one approved template per profile) ----
+  profile.zalo_enabled = toBool(profile.zalo_enabled, false);
+  profile.zalo_phone_column = String(profile.zalo_phone_column || '').trim();
+  profile.zalo_template_id = String(profile.zalo_template_id || '').trim();
+  profile.zalo_link_field = String(profile.zalo_link_field || 'link').trim() || 'link';
+  profile.zalo_field_map = profile.zalo_field_map && typeof profile.zalo_field_map === 'object' && !Array.isArray(profile.zalo_field_map)
+    ? profile.zalo_field_map
+    : {};
+  profile.zalo_drive_folder_id = String(profile.zalo_drive_folder_id || '').trim();
+  profile.zalo_skip_if_no_phone = toBool(profile.zalo_skip_if_no_phone, true);
+  profile.zalo_resend_already_sent = toBool(profile.zalo_resend_already_sent, false);
 
   profile.selected_sheet_rows = Array.isArray(profile.selected_sheet_rows)
     ? profile.selected_sheet_rows.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 1)
@@ -177,7 +199,13 @@ function resolveFsPath(candidate, fallback = null) {
 }
 
 function stripAccents(value) {
-  return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  // NFKD does not decompose "đ", so fold it explicitly - otherwise "SĐT" normalises
+  // to "s_t" (punctuation) instead of "sdt" and header matching fails.
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
 }
 
 function normalizeTemplateKey(value) {
@@ -348,6 +376,22 @@ function inferRoomColumn(headers) {
   for (const key of exact) if (map[key]) return map[key];
   for (const [key, header] of Object.entries(map)) {
     if (key.includes('room') || key.includes('phong')) return header;
+  }
+  return null;
+}
+
+// Zalo needs the tenant's phone number. "SĐT" folds to "sdt" via normalizeTemplateKey.
+function inferPhoneColumn(headers) {
+  const map = {};
+  for (const h of headers) {
+    const key = normalizeTemplateKey(h);
+    if (key && !map[key]) map[key] = h;
+  }
+  const exact = ['sdt', 'so_dien_thoai', 'dien_thoai', 'phone', 'phone_number', 'mobile', 'dt', 'zalo', 'sdt_zalo'];
+  for (const key of exact) if (map[key]) return map[key];
+  const tokens = ['sdt', 'dien_thoai', 'phone', 'mobile', 'zalo'];
+  for (const [key, header] of Object.entries(map)) {
+    if (tokens.some((token) => key.includes(token))) return header;
   }
   return null;
 }
@@ -939,6 +983,29 @@ async function runExport(rawProfile, options = {}) {
     selected_rows_matched: selectionMeta.selected_rows_matched || []
   };
 
+  // Optional Zalo notifications: one approved template per profile, bill delivered as a link.
+  const zaloConfig = profile.zalo_enabled ? loadZaloConfig() : null;
+  let phoneColumn = '';
+  if (profile.zalo_enabled) {
+    const sheetHeaders = Object.keys(records[0].data || {});
+    const requestedPhone = String(profile.zalo_phone_column || '').trim();
+    phoneColumn = requestedPhone
+      ? (resolveColumnName(sheetHeaders, requestedPhone) || '')
+      : (inferPhoneColumn(sheetHeaders) || '');
+    if (requestedPhone && !phoneColumn) {
+      logger(`Zalo: phone column '${requestedPhone}' was not found in the sheet headers.`);
+    } else if (phoneColumn) {
+      logger(`Zalo: recipient phone column is '${phoneColumn}'.`);
+    } else {
+      logger('Zalo: no phone column detected - bills will not be sent.');
+    }
+    if (!profile.zalo_template_id) logger('Zalo: no template id configured - bills will not be sent.');
+    if (!profile.zalo_drive_folder_id) logger('Zalo: no Drive folder configured - the bill link cannot be created.');
+    if (zaloConfig && zaloConfig.dry_run !== false) {
+      logger('Zalo: DRY-RUN is on - messages are built and logged but nothing is sent.');
+    }
+  }
+
   if (!selectedRecords.length) {
     throw new Error('No rows matched current export filters. Nothing to export.');
   }
@@ -998,8 +1065,46 @@ async function runExport(rawProfile, options = {}) {
       }
     }
 
+    if (profile.zalo_enabled) {
+      rowSummary.notification = await notifyBill({
+        drive,
+        profile,
+        record,
+        rowSummary,
+        extra: {
+          phone_column: phoneColumn,
+          room_column: selectionMeta.room_column,
+          bill_column: selectionMeta.skip_column
+        },
+        zaloConfig,
+        now: new Date(),
+        logger
+      });
+      const note = rowSummary.notification || {};
+      logger(`[${index + 1}/${selectedRecords.length}] Zalo -> ${note.status}${note.phone_masked ? ' ' + note.phone_masked : ''}${note.reason ? ' - ' + note.reason : ''}`);
+    }
+
     summary.processed_rows.push(rowSummary);
     logger(`[${index + 1}/${selectedRecords.length}] Completed sheet row ${sheetRow} -> ${presentationId}`);
+  }
+
+  if (profile.zalo_enabled) {
+    const notes = summary.processed_rows.map((row) => row.notification).filter(Boolean);
+    const count = (status) => notes.filter((n) => n.status === status).length;
+    summary.notifications = {
+      enabled: true,
+      dry_run: !zaloConfig || zaloConfig.dry_run !== false,
+      phone_column: phoneColumn,
+      template_id: profile.zalo_template_id || '',
+      drive_folder_id: profile.zalo_drive_folder_id || '',
+      counts: {
+        sent: count('sent'),
+        simulated: count('simulated'),
+        skipped: count('skipped'),
+        failed: count('failed')
+      }
+    };
+    logger(`Zalo summary: ${JSON.stringify(summary.notifications.counts)}`);
   }
 
   const summaryPath = path.join(runRoot, 'run_summary.json');
@@ -1138,5 +1243,10 @@ module.exports = {
   runExport,
   createGoogleClients,
   readSheetValues,
-  detectMappings
+  detectMappings,
+  inferPhoneColumn,
+  inferRoomColumn,
+  inferSkipColumn,
+  resolveColumnName,
+  buildRowRecords
 };

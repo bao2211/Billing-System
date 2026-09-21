@@ -10,7 +10,14 @@ const {
   validateProfile,
   getSheetRowSelectionPreview,
   getExportPreview,
-  runExport
+  runExport,
+  createGoogleClients,
+  readSheetValues,
+  buildRowRecords,
+  inferPhoneColumn,
+  inferRoomColumn,
+  inferSkipColumn,
+  resolveColumnName
 } = require('./exportService');
 const {
   ensureDefaultProfile,
@@ -20,6 +27,21 @@ const {
   deleteProfile,
   assertSafeProfileName
 } = require('./profileStore');
+const {
+  normalizePhone,
+  maskPhone,
+  buildTemplateData,
+  sendTemplateByPhone,
+  uploadBillToDrive,
+  assertDriveFolder,
+  refreshAccessToken
+} = require('./zaloService');
+const {
+  saveZaloConfig,
+  loadZaloConfig,
+  publicZaloConfig,
+  listNotifications
+} = require('./zaloStore');
 const {
   verifyPassword,
   createUser,
@@ -674,6 +696,165 @@ app.get('/api/download/database', requireRole('admin'), async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: String(error.message || error) });
+  }
+});
+
+/* ---------- Zalo notifications (admin only) ---------- */
+
+app.get('/api/zalo/config', requireRole('admin'), (_req, res) => {
+  res.json({ ok: true, config: publicZaloConfig() });
+});
+
+app.post('/api/zalo/config', requireRole('admin'), (req, res) => {
+  try {
+    const body = req.body || {};
+    const patch = {};
+    if (typeof body.access_token === 'string') patch.access_token = body.access_token.trim();
+    if (typeof body.refresh_token === 'string') patch.refresh_token = body.refresh_token.trim();
+    if (typeof body.app_id === 'string') patch.app_id = body.app_id.trim();
+    if (typeof body.secret_key === 'string') patch.secret_key = body.secret_key.trim();
+    if (typeof body.oa_id === 'string') patch.oa_id = body.oa_id.trim();
+    if (typeof body.dry_run === 'boolean') patch.dry_run = body.dry_run;
+    if (body.rate_limit_ms !== undefined) patch.rate_limit_ms = Number(body.rate_limit_ms) || 1200;
+    if (body.expires_in !== undefined) patch.expires_at = Date.now() + Number(body.expires_in) * 1000;
+    saveZaloConfig(patch);
+    res.json({ ok: true, config: publicZaloConfig() });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+app.post('/api/zalo/refresh', requireRole('admin'), async (_req, res) => {
+  try {
+    const next = await refreshAccessToken(loadZaloConfig());
+    saveZaloConfig(next);
+    res.json({ ok: true, config: publicZaloConfig() });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+app.get('/api/notifications', requireRole('admin'), (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      entries: listNotifications({ profile: req.query.profile || '', limit: Number(req.query.limit || 50) })
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+// Dry-run unless live:true is passed, so a test can never surprise a customer.
+app.post('/api/zalo/test', requireRole('admin'), async (req, res) => {
+  const logger = collectLogger();
+  try {
+    const body = req.body || {};
+    const live = body.live === true;
+    const config = loadZaloConfig();
+    const parsed = normalizePhone(body.phone);
+    if (!parsed.ok) return res.status(400).json({ error: `phone ${parsed.reason}` });
+
+    let templateId = String(body.template_id || '').trim();
+    let templateData = body.template_data && typeof body.template_data === 'object' ? { ...body.template_data } : null;
+
+    if (!templateData) {
+      const check = loadProfileForReport(req, body.profile_name || 'default');
+      if (check.error) return res.status(check.status).json({ error: check.error });
+      const profile = check.profile;
+      templateId = templateId || profile.zalo_template_id;
+      const { sheets } = await createGoogleClients(profile);
+      const values = await readSheetValues(sheets, profile);
+      const records = buildRowRecords(values, profile);
+      if (!records.length) {
+        return res.status(400).json({ error: 'The sheet returned no rows to build a test message from.' });
+      }
+      const headers = Object.keys(records[0].data || {});
+      const wanted = Number(body.sheet_row || 0);
+      const record = wanted ? records.find((r) => Number(r.sheet_row) === wanted) : records[0];
+      if (!record) return res.status(400).json({ error: `sheet_row ${wanted} was not found.` });
+      const extra = {
+        phone_column: profile.zalo_phone_column
+          ? (resolveColumnName(headers, profile.zalo_phone_column) || '')
+          : (inferPhoneColumn(headers) || ''),
+        room_column: inferRoomColumn(headers) || '',
+        bill_column: inferSkipColumn(headers) || ''
+      };
+      const fieldMap = body.field_map && typeof body.field_map === 'object' ? body.field_map : profile.zalo_field_map;
+      templateData = buildTemplateData({
+        profile: { ...profile, zalo_field_map: fieldMap || {} },
+        record,
+        link: String(body.link || 'https://example.com/test-bill-link'),
+        extra
+      });
+      logger.log(`Built template_data from sheet row ${record.sheet_row}.`);
+    }
+
+    if (!templateId) {
+      return res.status(400).json({ error: 'template_id is required (pass it, or set zalo_template_id on the profile).' });
+    }
+    const result = await sendTemplateByPhone({
+      accessToken: config.access_token,
+      phone: parsed.phone,
+      templateId,
+      templateData,
+      trackingId: String(body.tracking_id || `test-${Date.now().toString(36)}`).slice(0, 48),
+      dryRun: !live
+    });
+    res.json({
+      ok: true,
+      live,
+      phone_masked: maskPhone(parsed.phone),
+      template_id: templateId,
+      template_data: templateData,
+      result,
+      logs: logger.dump()
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error), logs: logger.dump() });
+  }
+});
+
+// Upload a harmless file to the configured Drive folder, confirm link sharing works,
+// then delete it - proves the hosting path before any real bill is sent.
+app.post('/api/zalo/verify-drive', requireRole('admin'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const check = loadProfileForReport(req, body.profile_name || 'default');
+    if (check.error) return res.status(check.status).json({ error: check.error });
+    const profile = check.profile;
+    const folderId = String(body.folder_id || profile.zalo_drive_folder_id || '').trim();
+    const { drive } = await createGoogleClients(profile);
+    const folder = await assertDriveFolder(drive, folderId);
+
+    const tmpPath = path.join(DOWNLOADS_DIR, `zalo-check-${Date.now()}.txt`);
+    fs.writeFileSync(tmpPath, 'Zalo Drive check from the billing system - safe to delete.\n');
+    let uploaded = null;
+    try {
+      uploaded = await uploadBillToDrive(drive, {
+        filePath: tmpPath,
+        folderId: folder.id,
+        name: path.basename(tmpPath)
+      });
+    } finally {
+      fs.rmSync(tmpPath, { force: true });
+    }
+    let removed = false;
+    try {
+      await drive.files.delete({ fileId: uploaded.id });
+      removed = true;
+    } catch (error) {
+      removed = false;
+    }
+    res.json({
+      ok: true,
+      folder: { id: folder.id, name: folder.name },
+      link: uploaded.webViewLink,
+      link_sharing: Boolean(uploaded.webViewLink),
+      cleaned_up: removed
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
   }
 });
 

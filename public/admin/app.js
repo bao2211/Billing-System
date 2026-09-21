@@ -84,21 +84,35 @@ const els = {
   // Download elements
   downloadUsersBtn: document.getElementById('downloadUsersBtn'),
   downloadProfilesBtn: document.getElementById('downloadProfilesBtn'),
-  downloadDatabaseBtn: document.getElementById('downloadDatabaseBtn')
+  downloadDatabaseBtn: document.getElementById('downloadDatabaseBtn'),
+
+  // Zalo (global OA panel)
+  zaloAccessToken: document.getElementById('zaloAccessToken'),
+  zaloOaId: document.getElementById('zalo_oa_id'),
+  zaloDryRun: document.getElementById('zaloDryRun'),
+  zaloSaveConfigBtn: document.getElementById('zaloSaveConfigBtn'),
+  zaloVerifyDriveBtn: document.getElementById('zaloVerifyDriveBtn'),
+  zaloTestSendBtn: document.getElementById('zaloTestSendBtn'),
+  zaloTestSendLiveBtn: document.getElementById('zaloTestSendLiveBtn'),
+  zaloTestPhone: document.getElementById('zaloTestPhone'),
+  zaloStatus: document.getElementById('zaloStatus'),
+  zaloResult: document.getElementById('zaloResult')
 };
 
 const textInputs = [
   'name','spreadsheet_id','sheet_name','sheet_range','template_presentation_id',
   'destination_folder_id','copy_name_template','output_dir','run_folder_name_template',
   'output_file_name_template','credentials_file','token_file','skip_zero_or_empty_column',
-  'selected_sheet_rows'
+  'selected_sheet_rows',
+  'zalo_phone_column','zalo_template_id','zalo_link_field','zalo_drive_folder_id'
 ];
 const numberInputs = ['header_row_index','data_start_row_index','max_rows'];
 const selectInputs = ['output_format','placeholder_strategy','reference_strategy'];
 const checkInputs = [
   'create_run_output_folder','split_outputs_by_row',
   'delete_generated_slides_after_export','skip_export_if_zero_or_empty',
-  'export_selected_rows_only'
+  'export_selected_rows_only',
+  'zalo_enabled','zalo_resend_already_sent'
 ];
 
 let previewImages = [];
@@ -192,6 +206,7 @@ function buildProfileFromForm() {
   checkInputs.forEach((id) => { profile[id] = getCheckboxValue(id); });
   profile.placeholder_mapping = parseJsonTextArea('placeholder_mapping');
   profile.reference_mapping = parseJsonTextArea('reference_mapping');
+  profile.zalo_field_map = parseJsonTextArea('zalo_field_map');
   profile.destination_folder_id = profile.destination_folder_id || null;
   profile.credentials_file = profile.credentials_file || null;
   profile.max_rows = Number.isInteger(profile.max_rows) ? profile.max_rows : null;
@@ -206,6 +221,7 @@ function setFormFromProfile(profile) {
   checkInputs.forEach((id) => setCheckboxValue(id, profile[id]));
   setInputValue('placeholder_mapping', JSON.stringify(profile.placeholder_mapping || {}, null, 2));
   setInputValue('reference_mapping', JSON.stringify(profile.reference_mapping || {}, null, 2));
+  setInputValue('zalo_field_map', JSON.stringify(profile.zalo_field_map || {}, null, 2));
 }
 
 async function refreshProfiles() {
@@ -1099,11 +1115,113 @@ function bindEvents() {
   });
 }
 
+/* ---------- Zalo (global OA panel + per-profile test) ---------- */
+
+function showZaloResult(text) {
+  if (!els.zaloResult) return;
+  els.zaloResult.style.display = 'block';
+  els.zaloResult.textContent = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
+}
+
+function renderZaloStatus(config) {
+  if (!els.zaloStatus || !config) return;
+  const bits = [];
+  bits.push(config.has_token ? `token ${config.token_preview}` : 'no token yet');
+  if (config.token_expired) bits.push('token EXPIRED');
+  bits.push(config.dry_run ? 'DRY-RUN - nothing is sent' : 'LIVE sending enabled');
+  if (config.oa_id) bits.push(`OA ${config.oa_id}`);
+  els.zaloStatus.textContent = bits.join(' · ');
+}
+
+async function loadZaloConfigPanel() {
+  try {
+    const body = await api('/api/zalo/config');
+    const config = body.config || {};
+    if (els.zaloDryRun) els.zaloDryRun.checked = Boolean(config.dry_run);
+    if (els.zaloOaId && !els.zaloOaId.value) els.zaloOaId.value = config.oa_id || '';
+    renderZaloStatus(config);
+  } catch (error) {
+    if (els.zaloStatus) els.zaloStatus.textContent = `Zalo settings unavailable: ${error.message}`;
+  }
+}
+
+async function saveZaloConfigPanel() {
+  try {
+    const payload = {
+      dry_run: Boolean(els.zaloDryRun && els.zaloDryRun.checked),
+      oa_id: els.zaloOaId ? els.zaloOaId.value.trim() : ''
+    };
+    const typed = els.zaloAccessToken ? els.zaloAccessToken.value.trim() : '';
+    if (typed) payload.access_token = typed;
+    const body = await api('/api/zalo/config', { method: 'POST', body: JSON.stringify(payload) });
+    if (els.zaloAccessToken) els.zaloAccessToken.value = '';
+    renderZaloStatus(body.config || {});
+    log('Zalo settings saved.');
+    showZaloResult(body.config || {});
+  } catch (error) {
+    log(`Zalo settings failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  }
+}
+
+async function verifyZaloDrive() {
+  try {
+    showLoading('Checking the Drive folder...');
+    const profile = buildProfileFromForm();
+    const body = await api('/api/zalo/verify-drive', {
+      method: 'POST',
+      body: JSON.stringify({ profile_name: profile.name })
+    });
+    log(`Drive folder OK: ${body.folder.name} (${body.folder.id})`);
+    showZaloResult(`Folder: ${body.folder.name}\nid: ${body.folder.id}\ntest link shared: ${body.link}\ncleaned up: ${body.cleaned_up}`);
+  } catch (error) {
+    log(`Verify Drive failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  } finally {
+    hideLoading();
+  }
+}
+
+async function testZaloTemplate(live) {
+  if (live && !confirm('This sends a REAL Zalo message to the number below. Continue?')) return;
+  try {
+    showLoading(live ? 'Sending the test message...' : 'Building the test message...');
+    const profile = buildProfileFromForm();
+    const body = await api('/api/zalo/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        profile_name: profile.name,
+        template_id: profile.zalo_template_id,
+        field_map: profile.zalo_field_map,
+        phone: els.zaloTestPhone ? els.zaloTestPhone.value.trim() : '',
+        live
+      })
+    });
+    log(`Zalo test (${live ? 'live' : 'dry-run'}) -> ${body.phone_masked}`);
+    showZaloResult({
+      mode: body.live ? 'LIVE' : 'DRY-RUN',
+      template_id: body.template_id,
+      template_data: body.template_data,
+      result: body.result
+    });
+  } catch (error) {
+    log(`Zalo test failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  } finally {
+    hideLoading();
+  }
+}
+
 async function init() {
   clearLog();
   await checkSession();
   bindEvents();
   initZoomPan();
+  if (els.zaloSaveConfigBtn) els.zaloSaveConfigBtn.addEventListener('click', saveZaloConfigPanel);
+  if (els.zaloVerifyDriveBtn) els.zaloVerifyDriveBtn.addEventListener('click', verifyZaloDrive);
+  if (els.zaloTestSendBtn) els.zaloTestSendBtn.addEventListener('click', () => testZaloTemplate(false));
+  if (els.zaloTestSendLiveBtn) els.zaloTestSendLiveBtn.addEventListener('click', () => testZaloTemplate(true));
+  await loadZaloConfigPanel();
   await refreshProfiles();
   await refreshAccounts();
   if (els.profileSelect.value) await loadSelectedProfile();
