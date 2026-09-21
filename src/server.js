@@ -317,6 +317,12 @@ app.get('/api/profiles', requireAuth, (req, res) => {
   }
 });
 
+// Admin and client both edit the profile through this endpoint, so hand back the
+// profile with defaults applied: a raw file that omits a field would otherwise show a
+// checkbox as OFF while the effective default is ON (zalo_bot_send_photo and
+// zalo_skip_if_no_phone both default to true), and an editor that disagrees with the
+// pipeline is a trap. normalizeProfile only fills in defaults and coerces types - it
+// never throws - so an incomplete profile stays editable.
 app.get('/api/profiles/:name', requireAuth, (req, res) => {
   try {
     const all = listProfiles();
@@ -324,7 +330,7 @@ app.get('/api/profiles/:name', requireAuth, (req, res) => {
     if (!filtered.includes(req.params.name)) {
       return res.status(403).json({ error: 'Profile not accessible' });
     }
-    const profile = loadProfile(req.params.name);
+    const profile = normalizeProfile(loadProfile(req.params.name));
     res.json({ profile });
   } catch (error) {
     res.status(404).json({ error: String(error.message || error) });
