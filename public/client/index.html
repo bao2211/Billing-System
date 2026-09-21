@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Client Portal — Sheet → Slide Exporter</title>
+  <link rel="stylesheet" href="/client/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <strong>Client Portal</strong>
+      <span class="muted">Sheet → Slide Exporter</span>
+    </div>
+    <div class="topbar-right">
+      <span id="userInfo"></span>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </header>
+
+  <main class="client-layout">
+    <section class="panel">
+      <h2>1. Select Profile</h2>
+      <div class="row">
+        <select id="profileSelect"></select>
+        <button id="refreshProfilesBtn">Refresh List</button>
+      </div>
+      <p class="hint">Choose a pre-configured profile set up by your admin.</p>
+    </section>
+
+    <section class="panel" id="rowSelectionPanel" style="display:none;">
+      <h2>2. Row Selection</h2>
+      <p id="rowSelectionSummary" class="hint"></p>
+      <div class="table-wrap large">
+        <table id="rowSelectionTable"></table>
+      </div>
+      <div class="actions">
+        <button id="selectAllRowsBtn">Select All</button>
+        <button id="clearRowsBtn">Clear</button>
+      </div>
+      <div class="selection-summary" id="selectionSummary"></div>
+    </section>
+
+    <section class="panel" id="actionsPanel" style="display:none;">
+      <h2>3. Actions</h2>
+      <div class="action-grid">
+        <button id="previewBillsBtn" class="large secondary">Preview Bills</button>
+        <button id="runExportBtn" class="large primary">Run Export</button>
+      </div>
+    </section>
+
+    <section class="panel" id="reportsPanel" style="display:none;">
+      <h2>4. Reports</h2>
+      <div class="action-grid report-grid">
+        <button id="reportMonthBtn" class="secondary">This Month Report</button>
+        <button id="reportYearBtn" class="secondary">This Year Report</button>
+        <button id="reportSelectedBtn" class="secondary">Selected Rows Report</button>
+      </div>
+
+      <div id="reportDashboard" class="report-dashboard hidden">
+        <div id="reportSummary" class="report-summary"></div>
+
+        <div class="kpi-grid" id="kpiGrid">
+          <div class="kpi-card"><div class="kpi-label">Total Revenue</div><div class="kpi-value" id="kpiTotal">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Row Count</div><div class="kpi-value" id="kpiCount">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Average Bill</div><div class="kpi-value" id="kpiAvg">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Highest Bill</div><div class="kpi-value" id="kpiMax">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Lowest Bill</div><div class="kpi-value" id="kpiMin">—</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Monthly Revenue (This Year)</h3>
+            <div class="chart-wrap"><canvas id="monthlyChart"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Yearly Revenue Comparison</h3>
+            <div class="chart-wrap"><canvas id="yearlyChart"></canvas></div>
+          </div>
+          <div class="chart-card wide">
+            <h3 id="trendChartTitle">Daily Trend</h3>
+            <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="table-wrap" id="reportTableWrap" style="display:none;">
+          <table id="reportTable"></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Run Log</h2>
+      <pre id="logOutput"></pre>
+    </section>
+  </main>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="loadingText">Working...</p>
+    </div>
+  </div>
+
+  <!-- Preview Modal -->
+  <div id="previewModal" class="modal hidden">
+    <div class="modal-content wide">
+      <div class="modal-header">
+        <h3>Bill Preview</h3>
+        <button class="close-btn" data-close="previewModal">Close</button>
+      </div>
+      <p id="previewSummary"></p>
+
+      <div class="gallery">
+        <button id="galleryPrev" class="gallery-arrow" aria-label="Previous bill">&#9664;</button>
+        <div class="gallery-main">
+          <div class="zoom-viewport" id="zoomViewport">
+            <img id="previewImage" alt="Bill preview" draggable="false" />
+          </div>
+          <div id="galleryCounter" class="gallery-counter"></div>
+          <p class="zoom-hint">Scroll to zoom · Drag to pan · Double-click to reset</p>
+        </div>
+        <button id="galleryNext" class="gallery-arrow" aria-label="Next bill">&#9654;</button>
+      </div>
+
+      <div class="gallery-thumbs" id="galleryThumbs"></div>
+
+      <div class="table-wrap">
+        <table id="previewTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Result Modal -->
+  <div id="exportModal" class="modal hidden">
+    <div class="modal-content wide">
+      <div class="modal-header">
+        <h3>Export Complete</h3>
+        <button class="close-btn" data-close="exportModal">Close</button>
+      </div>
+      <p id="exportSummary"></p>
+      <div class="download-all-wrap">
+        <a id="downloadAllBtn" class="download-all" href="#" download>Download All (ZIP)</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/client/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "sheet-slide-web-exporter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node.js web application for exporting Google Sheets rows to Google Slides PDF/images",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "googleapis": "^140.0.1"
+  }
+}

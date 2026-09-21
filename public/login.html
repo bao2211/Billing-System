@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Billing System — Login</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #222b3a;
+      --muted: #63708b;
+      --line: #dfe5f2;
+      --primary: #0f6ccf;
+      --primary-ink: #ffffff;
+      --danger: #d32f2f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(135deg, #eef2fb 0%, #f8f9fc 100%);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    .login-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 32px;
+      width: min(90vw, 420px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+    }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    p.subtitle { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font: inherit;
+      color: var(--ink);
+      background: #fff;
+    }
+    .actions { display: flex; gap: 10px; margin-top: 6px; }
+    button {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.primary {
+      background: var(--primary);
+      color: var(--primary-ink);
+      border-color: var(--primary);
+    }
+    .error { color: var(--danger); font-size: 13px; margin-top: 10px; }
+    .warn { color: #d97706; font-size: 13px; margin-top: 10px; background: #fffbeb; padding: 8px 10px; border-radius: 8px; border: 1px solid #fcd34d; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <h1>Billing System</h1>
+    <p class="subtitle">Sign in to your portal</p>
+    <form id="loginForm">
+      <label>Username
+        <input id="username" type="text" placeholder="Enter username" autocomplete="username" />
+      </label>
+      <label>Password
+        <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" />
+      </label>
+      <div class="actions">
+        <button type="submit" class="primary">Sign In</button>
+      </div>
+      <div id="error" class="error"></div>
+    </form>
+  </div>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Login failed');
+        if (data.needs_password_change) {
+          const el = document.getElementById('error');
+          el.className = 'warn';
+          el.innerHTML = '<strong>Warning:</strong> You must change your default password after signing in.';
+        }
+        setTimeout(() => {
+          window.location.href = data.role === 'admin' ? '/admin' : '/client';
+        }, data.needs_password_change ? 1500 : 0);
+      } catch (err) {
+        document.getElementById('error').textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

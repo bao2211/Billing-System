@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Portal — Billing System</title>
+  <link rel="stylesheet" href="/admin/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <strong>Admin Portal</strong>
+      <span class="muted">Billing System</span>
+    </div>
+    <div class="topbar-right">
+      <span id="userInfo"></span>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button id="tabProfiles" class="tab active">Profiles</button>
+    <button id="tabAccounts" class="tab">Accounts</button>
+  </nav>
+
+  <!-- Profiles View -->
+  <main id="profilesView" class="admin-layout">
+    <aside class="panel sidebar">
+      <h2>Profiles</h2>
+      <div class="row">
+        <select id="profileSelect" size="10"></select>
+      </div>
+      <div class="actions">
+        <button id="newProfileBtn">New</button>
+        <button id="deleteProfileBtn" class="danger">Delete</button>
+        <button id="refreshProfilesBtn">Refresh</button>
+      </div>
+    </aside>
+
+    <section class="panel editor">
+      <h2>Profile Configuration</h2>
+      <p class="editor-hint">Configure how this profile reads billing data from Google Sheets and generates slide bills.</p>
+
+      <!-- Upload / Download Database -->
+      <fieldset class="form-section">
+        <legend>Database Backup & Restore</legend>
+        <p class="hint">Upload or download your <code>users.json</code> and profile JSON files. Use this to migrate data between servers or create backups.</p>
+
+        <h4 style="margin:12px 0 6px; font-size:14px;">Upload (Restore)</h4>
+        <div class="grid">
+          <label>
+            users.json
+            <input id="dbUsersFile" type="file" accept=".json" />
+          </label>
+          <label>
+            Profile JSONs
+            <input id="dbProfileFiles" type="file" accept=".json" multiple />
+          </label>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:8px;">
+          <button id="uploadDatabaseBtn" type="button" class="primary">Upload Database</button>
+          <span id="dbUploadStatus" class="muted"></span>
+        </div>
+
+        <h4 style="margin:16px 0 6px; font-size:14px;">Download (Backup)</h4>
+        <div class="actions" style="border-top:none; padding-top:4px;">
+          <button id="downloadUsersBtn" type="button">Download Users (users.json)</button>
+          <button id="downloadProfilesBtn" type="button">Download Profiles (zip)</button>
+          <button id="downloadDatabaseBtn" type="button" class="primary">Download Full Database (zip)</button>
+        </div>
+      </fieldset>
+
+      <!-- Upload Credentials -->
+      <fieldset class="form-section">
+        <legend>Upload Google Credentials</legend>
+        <p class="hint">Upload your Google OAuth credential file and token file so profiles can authenticate with Google APIs.</p>
+        <div class="grid">
+          <label>
+            Credentials JSON (client_secret_*.json)
+            <input id="credFile" type="file" accept=".json" />
+          </label>
+          <label>
+            Token JSON (*.apps.googleusercontent.com.json)
+            <input id="tokenFile" type="file" accept=".json" />
+          </label>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:8px;">
+          <button id="uploadCredentialsBtn" type="button" class="primary">Upload Credentials</button>
+          <span id="credUploadStatus" class="muted"></span>
+        </div>
+        <p class="hint" style="margin-top:6px;">
+          After uploading, set <strong>credentials_file</strong> to <code>/app/google_credentials.json</code> and <strong>token_file</strong> to <code>/app/google_token.json</code> in your profiles.
+        </p>
+      </fieldset>
+
+      <!-- Identity -->
+      <fieldset class="form-section">
+        <legend>Profile Identity</legend>
+        <div class="grid">
+          <label>
+            Profile Name
+            <span class="field-hint">Unique name for this billing configuration.</span>
+            <input id="name" type="text" placeholder="e.g., monthly_bills_q1" />
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Data Source -->
+      <fieldset class="form-section">
+        <legend>Google Sheet Data Source</legend>
+        <div class="grid">
+          <label>
+            Spreadsheet ID
+            <span class="field-hint">The ID from your Google Sheets URL.</span>
+            <input id="spreadsheet_id" type="text" placeholder="1a2b3c..." />
+          </label>
+          <label>
+            Sheet Name
+            <span class="field-hint">The tab name inside the spreadsheet (e.g., "Invoices").</span>
+            <input id="sheet_name" type="text" placeholder="Sheet1" />
+          </label>
+          <label>
+            Sheet Range
+            <span class="field-hint">Cell range to read. Leave as A1:ZZ to scan all columns.</span>
+            <input id="sheet_range" type="text" placeholder="A1:ZZ" />
+          </label>
+          <label>
+            Header Row
+            <span class="field-hint">Row number containing column headers (usually 1).</span>
+            <input id="header_row_index" type="number" min="1" placeholder="1" />
+          </label>
+          <label>
+            Data Starts At Row
+            <span class="field-hint">First row of actual billing data (usually 2).</span>
+            <input id="data_start_row_index" type="number" min="1" placeholder="2" />
+          </label>
+          <label>
+            Max Rows (optional)
+            <span class="field-hint">Limit rows processed. Leave blank for all.</span>
+            <input id="max_rows" type="number" min="1" placeholder="Unlimited" />
+          </label>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:6px;">
+          <button id="detectColumnsBtn" type="button">Detect Columns</button>
+        </div>
+
+        <div id="detectResult" class="detect-panel hidden">
+          <h4>Detected Columns</h4>
+          <div class="detect-grid" id="detectGrid"></div>
+          <div class="actions" style="border-top:none; padding-top:6px;">
+            <button id="applyMappingBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Template & Output -->
+      <fieldset class="form-section">
+        <legend>Template & Destination</legend>
+        <div class="grid">
+          <label>
+            Slide Template ID
+            <span class="field-hint">Google Slides presentation ID used as the bill template.</span>
+            <input id="template_presentation_id" type="text" placeholder="1x2y3z..." />
+          </label>
+          <label>
+            Destination Folder ID
+            <span class="field-hint">Google Drive folder ID where generated slides are saved.</span>
+            <input id="destination_folder_id" type="text" placeholder="Optional — leave blank for root" />
+          </label>
+          <label>
+            Output Format
+            <span class="field-hint">What to generate: slide images, PDF, or both.</span>
+            <select id="output_format">
+              <option value="both">Both (Images + PDF)</option>
+              <option value="images">Images only</option>
+              <option value="pdf">PDF only</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Export Options -->
+      <fieldset class="form-section">
+        <legend>Export Options</legend>
+        <div class="checkboxes">
+          <label>
+            <input id="create_run_output_folder" type="checkbox" />
+            <span>Create a dated folder for each export run</span>
+          </label>
+          <label>
+            <input id="split_outputs_by_row" type="checkbox" />
+            <span>Save each bill in its own subfolder</span>
+          </label>
+          <label>
+            <input id="delete_generated_slides_after_export" type="checkbox" />
+            <span>Delete generated Google Slides after export</span>
+          </label>
+          <label>
+            <input id="skip_export_if_zero_or_empty" type="checkbox" />
+            <span>Skip rows where bill value is zero or empty</span>
+          </label>
+          <label>
+            <input id="export_selected_rows_only" type="checkbox" />
+            <span>Only export rows selected in the client portal</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Advanced Settings (collapsible) -->
+      <fieldset class="form-section advanced-section">
+        <legend class="advanced-toggle" id="advancedToggle">
+          <span>Advanced Settings</span>
+          <span class="toggle-icon">▸</span>
+        </legend>
+        <div class="advanced-body hidden" id="advancedBody">
+          <div class="grid cols-3">
+            <label>
+              Copy Name Template
+              <span class="field-hint">Name pattern for copied slide files.</span>
+              <input id="copy_name_template" type="text" />
+            </label>
+            <label>
+              Run Folder Template
+              <span class="field-hint">Name pattern for export run folders.</span>
+              <input id="run_folder_name_template" type="text" />
+            </label>
+            <label>
+              Output File Template
+              <span class="field-hint">Name pattern for exported files.</span>
+              <input id="output_file_name_template" type="text" />
+            </label>
+          </div>
+
+          <div class="grid cols-3">
+            <label>
+              Output Directory
+              <span class="field-hint">Local folder path for downloads.</span>
+              <input id="output_dir" type="text" />
+            </label>
+            <label>
+              Credentials File
+              <span class="field-hint">Path to Google service account JSON.</span>
+              <input id="credentials_file" type="text" placeholder="Optional" />
+            </label>
+            <label>
+              Token File
+              <span class="field-hint">Path to OAuth token cache.</span>
+              <input id="token_file" type="text" />
+            </label>
+          </div>
+
+          <div class="grid cols-3">
+            <label>
+              Placeholder Strategy
+              <span class="field-hint">How sheet columns map to slide placeholders.</span>
+              <select id="placeholder_strategy">
+                <option value="mapping_with_fallback">Mapping with fallback</option>
+                <option value="header_braces">Header braces</option>
+                <option value="mapping_only">Mapping only</option>
+              </select>
+            </label>
+            <label>
+              Reference Strategy
+              <span class="field-hint">How cell values are matched to template references.</span>
+              <select id="reference_strategy">
+                <option value="identity">Identity</option>
+                <option value="strip_whitespace">Strip whitespace</option>
+                <option value="strip_currency">Strip currency</option>
+                <option value="template_map">Template map</option>
+              </select>
+            </label>
+            <label>
+              Skip Check Column
+              <span class="field-hint">Column name to check for zero/empty skip.</span>
+              <input id="skip_zero_or_empty_column" type="text" placeholder="Optional" />
+            </label>
+          </div>
+
+          <div class="actions" style="border-top:none; padding-top:6px;">
+            <button id="detectMappingsBtn" type="button">Auto-Match Headers ↔ Placeholders</button>
+          </div>
+          <div id="mappingDetectResult" class="detect-panel hidden">
+            <h4>Detected Mappings</h4>
+            <div class="detect-grid" id="mappingDetectGrid"></div>
+            <div class="actions" style="border-top:none; padding-top:6px;">
+              <button id="applyMappingDetectBtn" type="button" class="primary">Apply to Placeholder Mapping</button>
+            </div>
+          </div>
+
+          <div class="json-grid">
+            <label>
+              Placeholder Mapping JSON
+              <span class="field-hint">Custom column-to-placeholder mappings.</span>
+              <textarea id="placeholder_mapping" rows="6">{}</textarea>
+            </label>
+            <label>
+              Reference Mapping JSON
+              <span class="field-hint">Custom value-to-reference mappings.</span>
+              <textarea id="reference_mapping" rows="6">{}</textarea>
+            </label>
+          </div>
+
+          <label style="margin-top:10px;">
+            Selected Sheet Rows
+            <span class="field-hint">Read-only list of rows selected in the client portal.</span>
+            <input id="selected_sheet_rows" type="text" disabled />
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Row Selection -->
+      <fieldset class="form-section" id="adminRowPanel" style="display:none;">
+        <legend>Row Selection</legend>
+        <p id="adminRowSummary" class="editor-hint"></p>
+        <div class="table-wrap large">
+          <table id="adminRowTable"></table>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:8px;">
+          <button id="adminSelectAllBtn" type="button">Select All</button>
+          <button id="adminClearBtn" type="button">Clear</button>
+        </div>
+        <div id="adminSelectionSummary" class="selection-summary"></div>
+      </fieldset>
+
+      <div class="actions">
+        <button id="saveProfileBtn" class="primary">Save Profile</button>
+        <button id="previewBillsBtn">Preview Bills</button>
+        <button id="runExportBtn" class="primary">Run Export</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Accounts View -->
+  <main id="accountsView" class="admin-layout hidden">
+    <aside class="panel sidebar">
+      <h2>Accounts</h2>
+      <div class="row">
+        <select id="accountSelect" size="10"></select>
+      </div>
+      <div class="actions">
+        <button id="newAccountBtn">New</button>
+        <button id="deleteAccountBtn" class="danger">Delete</button>
+        <button id="refreshAccountsBtn">Refresh</button>
+      </div>
+    </aside>
+
+    <section class="panel editor">
+      <h2>Account Settings</h2>
+
+      <fieldset class="form-section">
+        <legend>Change My Password</legend>
+        <div class="grid">
+          <label>Current Password<input id="my_curr_password" type="password" /></label>
+          <label>New Password<input id="my_new_password" type="password" /></label>
+        </div>
+        <div class="actions" style="border-top:none; padding-top:8px;">
+          <button id="changeMyPasswordBtn" class="primary">Change Password</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="form-section">
+        <legend>Manage Accounts</legend>
+        <div class="grid">
+          <label>Username<input id="acc_username" type="text" /></label>
+          <label>Password<input id="acc_password" type="password" placeholder="Leave blank to keep current" /></label>
+          <label>Role
+            <select id="acc_role">
+              <option value="client">Client</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="panel" style="margin-top: 10px;">
+          <h3 style="margin: 0 0 8px; font-size: 14px;">Allowed Profiles</h3>
+          <p class="hint" style="margin: 0 0 8px;">Check profiles this account can access. "All profiles" gives unrestricted access.</p>
+          <label class="checkbox-inline">
+            <input id="acc_all_profiles" type="checkbox" /> All profiles (unrestricted)
+          </label>
+          <div id="accProfileList" class="profile-checklist"></div>
+        </div>
+
+        <div class="actions">
+          <button id="saveAccountBtn" class="primary">Save Account</button>
+        </div>
+      </fieldset>
+    </section>
+  </main>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="loadingText">Working...</p>
+    </div>
+  </div>
+
+  <div id="previewModal" class="modal hidden">
+    <div class="modal-content wide">
+      <div class="modal-header">
+        <h3>Bill Preview</h3>
+        <button class="close-btn" data-close="previewModal">Close</button>
+      </div>
+      <p id="previewSummary"></p>
+
+      <div class="gallery">
+        <button id="galleryPrev" class="gallery-arrow" aria-label="Previous bill">&#9664;</button>
+        <div class="gallery-main">
+          <div class="zoom-viewport" id="zoomViewport">
+            <img id="previewImage" alt="Bill preview" draggable="false" />
+          </div>
+          <div id="galleryCounter" class="gallery-counter"></div>
+          <p class="zoom-hint">Scroll to zoom · Drag to pan · Double-click to reset</p>
+        </div>
+        <button id="galleryNext" class="gallery-arrow" aria-label="Next bill">&#9654;</button>
+      </div>
+
+      <div class="gallery-thumbs" id="galleryThumbs"></div>
+
+      <div class="table-wrap">
+        <table id="previewTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <div id="exportModal" class="modal hidden">
+    <div class="modal-content wide">
+      <div class="modal-header">
+        <h3>Export Complete</h3>
+        <button class="close-btn" data-close="exportModal">Close</button>
+      </div>
+      <p id="exportSummary"></p>
+      <div class="download-all-wrap">
+        <a id="downloadAllBtn" class="download-all" href="#" download>Download All (ZIP)</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

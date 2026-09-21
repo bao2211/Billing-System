@@ -1,2 +1,28 @@
-/.venv
-/.vscode
+node_modules
+npm-debug.log
+downloads
+profiles
+sessions
+users.json
+sheet_slide_export_token.json
+google_credentials.json
+google_token.json
+*.md
+!.gitignore
+!README.md
+.DS_Store
+.env
+_server.*.log
+
+# ---- secrets: never commit these ----
+client_secret_*.json
+.vscode/
+cookies*.txt
+.google_workspace_mcp/
+*.pem
+
+# ---- report artefacts: contain customer PII and are large binaries ----
+Document/_shots/
+Document/_fig/
+Document/*.docx
+Document/*.pdf

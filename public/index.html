@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sheet -> Slide Web Exporter</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <label for="profileSelect">Profile</label>
+      <select id="profileSelect"></select>
+      <button id="refreshProfilesBtn">Refresh</button>
+      <button id="loadProfileBtn">Load</button>
+      <button id="saveProfileBtn">Save</button>
+      <button id="previewBillsBtn">Preview Bills</button>
+      <button id="runExportBtn" class="primary">Run Export</button>
+    </div>
+    <div class="topbar-right">
+      <label class="checkbox-inline">
+        <input type="checkbox" id="hideConfigToggle" />
+        Hide configuration
+      </label>
+    </div>
+  </header>
+
+  <main id="appMain" class="layout">
+    <section id="configPanel" class="panel panel-config">
+      <h2>Configuration</h2>
+
+      <div class="grid">
+        <label>Profile Name<input id="name" type="text" /></label>
+        <label>Spreadsheet ID<input id="spreadsheet_id" type="text" /></label>
+        <label>Sheet Name<input id="sheet_name" type="text" /></label>
+        <label>Sheet Range<input id="sheet_range" type="text" /></label>
+        <label>Header Row Index<input id="header_row_index" type="number" min="1" /></label>
+        <label>Data Start Row Index<input id="data_start_row_index" type="number" min="1" /></label>
+        <label>Template Presentation ID<input id="template_presentation_id" type="text" /></label>
+        <label>Destination Folder ID<input id="destination_folder_id" type="text" /></label>
+        <label>Copy Name Template<input id="copy_name_template" type="text" /></label>
+        <label>Output Directory<input id="output_dir" type="text" /></label>
+        <label>Run Folder Name Template<input id="run_folder_name_template" type="text" /></label>
+        <label>Output File Name Template<input id="output_file_name_template" type="text" /></label>
+        <label>Credentials File<input id="credentials_file" type="text" /></label>
+        <label>Token File<input id="token_file" type="text" /></label>
+        <label>Max Rows (optional)<input id="max_rows" type="number" min="1" /></label>
+        <label>Skip Check Column (optional)<input id="skip_zero_or_empty_column" type="text" /></label>
+        <label>Selected Sheet Rows<input id="selected_sheet_rows" type="text" disabled /></label>
+      </div>
+
+      <div class="grid">
+        <label>
+          Output Format
+          <select id="output_format">
+            <option value="pdf">pdf</option>
+            <option value="images">images</option>
+            <option value="both">both</option>
+          </select>
+        </label>
+        <label>
+          Placeholder Strategy
+          <select id="placeholder_strategy">
+            <option value="header_braces">header_braces</option>
+            <option value="mapping_only">mapping_only</option>
+            <option value="mapping_with_fallback">mapping_with_fallback</option>
+          </select>
+        </label>
+        <label>
+          Reference Strategy
+          <select id="reference_strategy">
+            <option value="identity">identity</option>
+            <option value="strip_whitespace">strip_whitespace</option>
+            <option value="strip_currency">strip_currency</option>
+            <option value="template_map">template_map</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="checkboxes">
+        <label><input id="create_run_output_folder" type="checkbox" /> Create run output folder</label>
+        <label><input id="split_outputs_by_row" type="checkbox" /> Create per-row subfolders</label>
+        <label><input id="delete_generated_slides_after_export" type="checkbox" /> Delete generated Slides after export</label>
+        <label><input id="skip_export_if_zero_or_empty" type="checkbox" /> Skip export when value is 0 or empty</label>
+        <label><input id="export_selected_rows_only" type="checkbox" /> Export selected rows only</label>
+      </div>
+
+      <div class="actions">
+        <button id="rowSelectorBtn">Excel Preview (Select Rows)</button>
+        <button id="showOutputFolderBtn">Show Output Folder</button>
+      </div>
+
+      <div class="json-grid">
+        <label>
+          Placeholder Mapping JSON
+          <textarea id="placeholder_mapping" rows="10">{}</textarea>
+        </label>
+        <label>
+          Reference Mapping JSON
+          <textarea id="reference_mapping" rows="10">{}</textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel panel-log">
+      <h2>Run Log</h2>
+      <pre id="logOutput"></pre>
+    </section>
+  </main>
+
+  <div id="previewModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content wide">
+      <div class="modal-header">
+        <h3>Bill Export Preview</h3>
+        <button class="close-btn" data-close="previewModal">Close</button>
+      </div>
+      <p id="previewSummary"></p>
+      <div class="preview-image-wrap">
+        <img id="previewImage" alt="First bill preview" />
+      </div>
+      <div class="table-wrap">
+        <table id="previewTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <div id="rowSelectorModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content xwide">
+      <div class="modal-header">
+        <h3>Excel Preview - Select Rows To Export</h3>
+        <button class="close-btn" data-close="rowSelectorModal">Close</button>
+      </div>
+      <p id="rowSelectorSummary"></p>
+      <div class="table-wrap large">
+        <table id="rowSelectorTable"></table>
+      </div>
+      <div class="actions">
+        <button id="selectAllRowsBtn">Select All</button>
+        <button id="clearRowsBtn">Clear</button>
+        <button id="applyRowsBtn" class="primary">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
