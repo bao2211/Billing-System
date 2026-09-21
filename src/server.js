@@ -34,8 +34,31 @@ const {
   sendTemplateByPhone,
   uploadBillToDrive,
   assertDriveFolder,
-  refreshAccessToken
+  refreshAccessToken,
+  // Zalo Bot Platform
+  verifyBotToken,
+  pollBotUpdates,
+  isBotConfigured,
+  buildBotMessage,
+  extractPhoneFromText,
+  ingestBotUpdate
 } = require('./zaloService');
+const {
+  maskBotToken,
+  sendBotMessage,
+  setBotWebhook,
+  deleteBotWebhook,
+  getBotWebhookInfo,
+  normalizeBotUpdate
+} = require('./zaloBotService');
+const {
+  listSubscribers,
+  publicSubscriber,
+  deleteSubscriber,
+  setSubscriberPhone,
+  unlinkSubscriberPhone,
+  findByPhone
+} = require('./zaloSubscriberStore');
 const {
   saveZaloConfig,
   loadZaloConfig,
@@ -416,9 +439,17 @@ app.post('/api/export', requireAuth, async (req, res) => {
     // The client portal may opt in or out of Zalo delivery for this run only.
     const body = req.body || {};
     if (typeof body.notify_via_zalo === 'boolean') {
-      if (body.notify_via_zalo && (!profile.zalo_template_id || !profile.zalo_drive_folder_id)) {
+      // A Drive folder is needed either way (the bill travels as a link); the OA
+      // provider additionally needs a Zalo-approved template id, while the Bot
+      // provider just needs the tenant's chat to be linked.
+      const zaloConfig = loadZaloConfig();
+      const botProvider = zaloConfig.provider === 'bot';
+      const missing = [];
+      if (!profile.zalo_drive_folder_id) missing.push('Drive folder');
+      if (!botProvider && !profile.zalo_template_id) missing.push('Zalo template id');
+      if (body.notify_via_zalo && missing.length) {
         profile.zalo_enabled = false;
-        logger.log('Zalo: requested but this profile has no template id / Drive folder configured - Zalo is skipped for this run.');
+        logger.log(`Zalo: requested but this profile has no ${missing.join(' and ')} configured - Zalo is skipped for this run.`);
       } else {
         profile.zalo_enabled = body.notify_via_zalo;
         logger.log(`Zalo: ${body.notify_via_zalo ? 'enabled' : 'disabled'} for this run by the client portal.`);
@@ -721,7 +752,17 @@ app.get('/api/download/database', requireRole('admin'), async (req, res) => {
 // to label the "send via Zalo" option.
 app.get('/api/zalo/status', requireAuth, (_req, res) => {
   const config = loadZaloConfig();
-  res.json({ ok: true, dry_run: config.dry_run !== false, has_token: Boolean(config.access_token) });
+  const provider = config.provider === 'bot' ? 'bot' : 'oa';
+  res.json({
+    ok: true,
+    provider,
+    dry_run: config.dry_run !== false,
+    // For the bot provider the tenant has to have opened a chat first, so the client
+    // portal also learns how many tenants are reachable.
+    has_token: provider === 'bot' ? isBotConfigured(config) : Boolean(config.access_token),
+    linked_chats: listSubscribers().filter((item) => Boolean(item.phone)).length,
+    bot_share_link: config.bot_share_link || ''
+  });
 });
 
 app.get('/api/zalo/config', requireRole('admin'), (_req, res) => {
@@ -732,6 +773,7 @@ app.post('/api/zalo/config', requireRole('admin'), (req, res) => {
   try {
     const body = req.body || {};
     const patch = {};
+    if (body.provider === 'oa' || body.provider === 'bot') patch.provider = body.provider;
     if (typeof body.access_token === 'string') patch.access_token = body.access_token.trim();
     if (typeof body.refresh_token === 'string') patch.refresh_token = body.refresh_token.trim();
     if (typeof body.app_id === 'string') patch.app_id = body.app_id.trim();
@@ -740,10 +782,186 @@ app.post('/api/zalo/config', requireRole('admin'), (req, res) => {
     if (typeof body.dry_run === 'boolean') patch.dry_run = body.dry_run;
     if (body.rate_limit_ms !== undefined) patch.rate_limit_ms = Number(body.rate_limit_ms) || 1200;
     if (body.expires_in !== undefined) patch.expires_at = Date.now() + Number(body.expires_in) * 1000;
+    // ---- Zalo Bot Platform ----
+    if (typeof body.bot_token === 'string' && body.bot_token.trim()) patch.bot_token = body.bot_token.trim();
+    if (typeof body.bot_webhook_secret === 'string') patch.bot_webhook_secret = body.bot_webhook_secret.trim();
+    if (typeof body.bot_auto_reply === 'boolean') patch.bot_auto_reply = body.bot_auto_reply;
+    if (body.bot_poll_ms !== undefined) {
+      patch.bot_poll_ms = Math.max(3000, Math.min(120000, Number(body.bot_poll_ms) || 15000));
+    }
     saveZaloConfig(patch);
+    restartBotPoller();
     res.json({ ok: true, config: publicZaloConfig() });
   } catch (error) {
     res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+/* ---------- Zalo Bot Platform ---------- */
+
+// getUpdates (polling) and webhooks are mutually exclusive on Zalo's side, and the Bot
+// Platform rejects localhost webhook URLs - so polling is the default transport here.
+// Set ZALO_BOT_POLL=0 to keep the poller out of the way (tests, one-off scripts).
+const BOT_POLL_DISABLED = process.env.ZALO_BOT_POLL === '0' || process.env.ZALO_BOT_POLL === 'false';
+let botPollerTimer = null;
+let botPollInFlight = false;
+
+async function botPollerTick() {
+  if (botPollInFlight) return;
+  const config = loadZaloConfig();
+  if (!isBotConfigured(config)) return;
+  botPollInFlight = true;
+  try {
+    const outcome = await pollBotUpdates({ config, logger: (m) => console.log(m), timeout: 5 });
+    for (const result of outcome.results) {
+      if (result.action === 'linked' || result.action === 'relinked') {
+        console.log(`Zalo bot: bound ${result.phone_masked} to chat ${result.chat_id}.`);
+      }
+    }
+  } catch (error) {
+    const message = String(error.message || error).slice(0, 200);
+    try { saveZaloConfig({ bot_last_poll_error: message }); } catch (e) { /* ignore */ }
+    console.log(`Zalo bot poll failed: ${message}`);
+  } finally {
+    botPollInFlight = false;
+  }
+}
+
+function restartBotPoller() {
+  if (botPollerTimer) {
+    clearInterval(botPollerTimer);
+    botPollerTimer = null;
+  }
+  const config = loadZaloConfig();
+  if (BOT_POLL_DISABLED || !isBotConfigured(config)) return;
+  const interval = Math.max(5000, Number(config.bot_poll_ms) || 15000);
+  botPollerTimer = setInterval(botPollerTick, interval);
+  if (botPollerTimer.unref) botPollerTimer.unref();
+  console.log(`Zalo bot: polling getUpdates every ${Math.round(interval / 1000)}s.`);
+}
+
+// Validate the pasted bot token and remember the bot identity + share link.
+app.post('/api/zalo/bot/verify', requireRole('admin'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const config = loadZaloConfig();
+    const token = String(body.bot_token || '').trim() || config.bot_token;
+    if (!token) {
+      return res.status(400).json({ error: 'Paste a bot token first (Zalo Bot Manager sends it as "<id>:<secret>").' });
+    }
+    const bot = await verifyBotToken(token);
+    saveZaloConfig({
+      bot_token: token,
+      bot_account_name: bot.account_name,
+      bot_display_name: bot.display_name,
+      bot_account_type: bot.account_type,
+      bot_can_join_groups: bot.can_join_groups,
+      bot_share_link: bot.share_link,
+      bot_verified_at: Date.now(),
+      bot_last_poll_error: ''
+    });
+    restartBotPoller();
+    res.json({ ok: true, bot, config: publicZaloConfig() });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+// One manual long-poll round so a tenant can be onboarded without waiting for the
+// background poller. Auto-links any phone number the tenant sent to the bot.
+app.post('/api/zalo/bot/poll', requireRole('admin'), async (req, res) => {
+  const logger = collectLogger();
+  try {
+    const body = req.body || {};
+    const config = loadZaloConfig();
+    if (!isBotConfigured(config)) return res.status(400).json({ error: 'No Zalo bot token configured.' });
+    const outcome = await pollBotUpdates({
+      config,
+      logger: (m) => logger.log(m),
+      timeout: body.timeout === undefined ? 5 : Number(body.timeout),
+      autoReply: body.auto_reply === undefined ? undefined : body.auto_reply === true
+    });
+    res.json({
+      ok: true,
+      ...outcome,
+      subscribers: listSubscribers().map(publicSubscriber),
+      logs: logger.dump()
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error), logs: logger.dump() });
+  }
+});
+
+// Send a real message to one chat. Dry-run unless live:true, so a test can never
+// surprise a tenant by accident.
+app.post('/api/zalo/bot/send-test', requireRole('admin'), async (req, res) => {
+  const logger = collectLogger();
+  try {
+    const body = req.body || {};
+    const config = loadZaloConfig();
+    if (!isBotConfigured(config)) return res.status(400).json({ error: 'No Zalo bot token configured.' });
+    const live = body.live === true;
+
+    let chatId = String(body.chat_id || '').trim();
+    const phone = String(body.phone || '').trim();
+    if (!chatId && phone) {
+      const parsed = normalizePhone(phone);
+      if (!parsed.ok) return res.status(400).json({ error: `phone ${parsed.reason}` });
+      const subscriber = findByPhone(parsed.phone);
+      if (!subscriber) {
+        return res.status(400).json({
+          error: `${maskPhone(parsed.phone)} has not messaged the bot yet. Open ${config.bot_share_link || 'the bot in Zalo'}, send that phone number to it, then try again.`
+        });
+      }
+      chatId = subscriber.chat_id;
+    }
+    if (!chatId) {
+      return res.status(400).json({ error: 'Pass chat_id, or a phone that is already linked to a chat.' });
+    }
+
+    // Prefer the profile's real message built from a sheet row over a literal string.
+    let text = String(body.text || '').trim();
+    if (!text) {
+      const check = loadProfileForReport(req, body.profile_name || 'default');
+      if (check.error) return res.status(check.status).json({ error: check.error });
+      const profile = check.profile;
+      const { sheets } = await createGoogleClients(profile);
+      const values = await readSheetValues(sheets, profile);
+      const records = buildRowRecords(values, profile);
+      if (!records.length) {
+        return res.status(400).json({ error: 'The sheet returned no rows to build a test message from.' });
+      }
+      const headers = Object.keys(records[0].data || {});
+      const wanted = Number(body.sheet_row || 0);
+      const record = wanted ? records.find((r) => Number(r.sheet_row) === wanted) : records[0];
+      if (!record) return res.status(400).json({ error: `sheet_row ${wanted} was not found.` });
+      const extra = {
+        phone_column: profile.zalo_phone_column
+          ? (resolveColumnName(headers, profile.zalo_phone_column) || '')
+          : (inferPhoneColumn(headers) || ''),
+        room_column: inferRoomColumn(headers) || '',
+        bill_column: inferSkipColumn(headers) || '',
+        period: new Date().toISOString().slice(0, 7)
+      };
+      text = buildBotMessage({
+        profile,
+        record,
+        link: String(body.link || 'https://example.com/test-bill-link'),
+        extra
+      });
+      logger.log(`Built the bot message from sheet row ${record.sheet_row}.`);
+    }
+
+    text = `[TEST] ${text}`;
+    if (!live) {
+      logger.log(`[dry-run] would POST sendMessage to chat ${chatId}`);
+      return res.json({ ok: true, live: false, chat_id: chatId, text, logs: logger.dump() });
+    }
+    const sent = await sendBotMessage(config.bot_token, { chatId, text });
+    logger.log(`Sent to chat ${chatId} (message ${sent.message_id}).`);
+    res.json({ ok: true, live: true, chat_id: chatId, text, result: sent, logs: logger.dump() });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error), logs: logger.dump() });
   }
 });
 
@@ -753,6 +971,105 @@ app.post('/api/zalo/refresh', requireRole('admin'), async (_req, res) => {
     saveZaloConfig(next);
     res.json({ ok: true, config: publicZaloConfig() });
   } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+// A bill can only be delivered to a chat that exists, so the admin panel keeps the
+// list of chats that messaged the bot and lets the phone binding be fixed by hand.
+app.get('/api/zalo/subscribers', requireRole('admin'), (_req, res) => {
+  res.json({ ok: true, subscribers: listSubscribers().map(publicSubscriber) });
+});
+
+app.post('/api/zalo/subscribers', requireRole('admin'), (req, res) => {
+  try {
+    const body = req.body || {};
+    const chatId = String(body.chat_id || '').trim();
+    if (!chatId) return res.status(400).json({ error: 'chat_id is required.' });
+    const parsed = normalizePhone(body.phone);
+    if (!parsed.ok) return res.status(400).json({ error: `phone ${parsed.reason}` });
+    const record = setSubscriberPhone(chatId, parsed.phone, 'admin');
+    res.json({ ok: true, subscriber: publicSubscriber(record) });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+app.post('/api/zalo/subscribers/:chatId/unlink', requireRole('admin'), (req, res) => {
+  try {
+    const record = unlinkSubscriberPhone(req.params.chatId);
+    if (!record) return res.status(404).json({ error: 'That chat is not in the list.' });
+    res.json({ ok: true, subscriber: publicSubscriber(record) });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+app.delete('/api/zalo/subscribers/:chatId', requireRole('admin'), (req, res) => {
+  try {
+    if (!deleteSubscriber(req.params.chatId)) {
+      return res.status(404).json({ error: 'That chat is not in the list.' });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+// Zalo calls this when a public HTTPS URL is registered (see /api/zalo/bot/set-webhook).
+// No requireAuth: Zalo cannot log in, so the shared secret header IS the authentication.
+app.post('/api/zalo/bot/webhook', async (req, res) => {
+  try {
+    const config = loadZaloConfig();
+    const secret = String(config.bot_webhook_secret || '');
+    const provided = String(req.headers['x-bot-api-secret-token'] || '');
+    if (!secret || provided !== secret) {
+      return res.status(403).json({ ok: false, message: 'Unauthorized' });
+    }
+    const result = (req.body && req.body.result) || {};
+    const update = normalizeBotUpdate({ event_name: result.event_name, message: result.message });
+    const outcome = await ingestBotUpdate({ update, config });
+    res.json({ ok: true, outcome });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: String(error.message || error) });
+  }
+});
+
+app.post('/api/zalo/bot/set-webhook', requireRole('admin'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const config = loadZaloConfig();
+    if (!isBotConfigured(config)) return res.status(400).json({ error: 'No Zalo bot token configured.' });
+    if (body.remove === true) {
+      const info = await deleteBotWebhook(config.bot_token);
+      return res.json({ ok: true, removed: true, info });
+    }
+    const secret = String(body.secret_token || config.bot_webhook_secret || '').trim();
+    const webhook = await setBotWebhook(config.bot_token, { url: body.url, secretToken: secret });
+    saveZaloConfig({ bot_webhook_secret: secret });
+    res.json({ ok: true, webhook });
+  } catch (error) {
+    res.status(400).json({ error: String(error.message || error) });
+  }
+});
+
+app.get('/api/zalo/bot/webhook-info', requireRole('admin'), async (_req, res) => {
+  try {
+    const config = loadZaloConfig();
+    if (!isBotConfigured(config)) return res.status(400).json({ error: 'No Zalo bot token configured.' });
+    const info = await getBotWebhookInfo(config.bot_token);
+    res.json({ ok: true, registered: true, info });
+  } catch (error) {
+    // Zalo answers 404 Not Found when no webhook has ever been registered. That is the
+    // normal state for this app (it polls with getUpdates), so report it, do not fail.
+    if (error && Number(error.error_code) === 404) {
+      return res.json({
+        ok: true,
+        registered: false,
+        info: null,
+        message: 'No webhook is registered. This deployment receives messages with getUpdates polling instead.'
+      });
+    }
     res.status(400).json({ error: String(error.message || error) });
   }
 });
@@ -889,4 +1206,11 @@ app.listen(PORT, () => {
   console.log(`Admin portal:     http://localhost:${PORT}/admin`);
   console.log(`Downloads dir:    ${DOWNLOADS_DIR}`);
   console.log(`Default token path: ${path.join(os.homedir(), '.google_workspace_mcp', 'credentials', 'sheet_slide_export_token.json')}`);
+
+  // Start the Zalo Bot poller when a bot token is configured (no-op otherwise).
+  const zalo = loadZaloConfig();
+  if (isBotConfigured(zalo)) {
+    console.log(`Zalo delivery:    ${zalo.provider === 'bot' ? 'Zalo Bot Platform' : 'Zalo OA/ZNS'}${zalo.dry_run !== false ? ' (DRY-RUN)' : ''}`);
+    restartBotPoller();
+  }
 });

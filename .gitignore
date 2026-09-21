@@ -23,6 +23,8 @@ cookies*.txt
 # ---- generated Zalo state: global OA token + notification audit log ----
 zalo_config.json
 notifications.json
+# ---- Zalo Bot Platform: real phone <-> chat bindings (PII, never commit) ----
+zalo_subscribers.json
 
 # ---- report artefacts: contain customer PII and are large binaries ----
 Document/_shots/

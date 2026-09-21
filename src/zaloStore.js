@@ -1,11 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
-// Global Zalo OA configuration. Lives outside profiles/*.json because the OA access
+const { countLinked } = require('./zaloSubscriberStore');
+
+// Global Zalo configuration. Lives outside profiles/*.json because the OA access
 // token is company-wide, and it is NOT committed to git (see .gitignore).
 const CONFIG_PATH = path.resolve(__dirname, '..', 'zalo_config.json');
 
 const DEFAULTS = {
+  // 'oa'  = Zalo Official Account / ZNS template messages addressed by phone number
+  // 'bot' = Zalo Bot Platform chat messages addressed by chat_id (see zaloSubscriberStore)
+  provider: 'oa',
   access_token: '',
   refresh_token: '',
   expires_at: 0,
@@ -13,7 +18,20 @@ const DEFAULTS = {
   secret_key: '',
   oa_id: '',
   dry_run: true,
-  rate_limit_ms: 1200
+  rate_limit_ms: 1200,
+  // ---- Zalo Bot Platform (https://docs.zaloplatforms.com/docs/BOT) ----
+  bot_token: '',
+  bot_account_name: '',
+  bot_display_name: '',
+  bot_account_type: '',
+  bot_can_join_groups: false,
+  bot_share_link: '',
+  bot_verified_at: 0,
+  bot_webhook_secret: '',
+  bot_auto_reply: true,
+  bot_poll_ms: 15000,
+  bot_last_poll_at: 0,
+  bot_last_poll_error: ''
 };
 
 function ensureConfig() {
@@ -47,17 +65,41 @@ function maskToken(token) {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-// Never return the raw token to the browser - only enough to know it is set.
+// Shared by both providers so the admin panel can show one status line.
+function providerLabel(config) {
+  return config.provider === 'bot' ? 'Zalo Bot Platform' : 'Zalo Official Account';
+}
+
+// Never return a raw token to the browser - only enough to know it is set.
 function publicZaloConfig() {
   const config = loadZaloConfig();
+  const provider = config.provider === 'bot' ? 'bot' : 'oa';
   return {
+    provider,
+    provider_label: providerLabel(config),
     dry_run: config.dry_run !== false,
+    // ---- OA / ZNS ----
     has_token: Boolean(config.access_token),
     token_preview: maskToken(config.access_token),
     token_expires_at: config.expires_at || 0,
     token_expired: isTokenExpired(config),
     has_refresh: Boolean(config.refresh_token && config.app_id && config.secret_key),
     oa_id: config.oa_id || '',
+    // ---- Zalo Bot Platform ----
+    has_bot_token: Boolean(config.bot_token),
+    bot_token_preview: maskToken(config.bot_token),
+    bot_account_name: config.bot_account_name || '',
+    bot_display_name: config.bot_display_name || '',
+    bot_account_type: config.bot_account_type || '',
+    bot_can_join_groups: config.bot_can_join_groups === true,
+    bot_share_link: config.bot_share_link || '',
+    bot_verified_at: Number(config.bot_verified_at) || 0,
+    bot_auto_reply: config.bot_auto_reply !== false,
+    bot_poll_ms: Number(config.bot_poll_ms) || DEFAULTS.bot_poll_ms,
+    bot_last_poll_at: Number(config.bot_last_poll_at) || 0,
+    bot_last_poll_error: config.bot_last_poll_error || '',
+    linked_chats: countLinked(),
+    // ---- shared ----
     rate_limit_ms: Number(config.rate_limit_ms) || DEFAULTS.rate_limit_ms
   };
 }
@@ -114,6 +156,7 @@ module.exports = {
   loadZaloConfig,
   saveZaloConfig,
   publicZaloConfig,
+  providerLabel,
   isTokenExpired,
   maskToken,
   loadLedger,

@@ -86,7 +86,10 @@ const els = {
   downloadProfilesBtn: document.getElementById('downloadProfilesBtn'),
   downloadDatabaseBtn: document.getElementById('downloadDatabaseBtn'),
 
-  // Zalo (global OA panel)
+  // Zalo delivery (global)
+  zaloProvider: document.getElementById('zaloProvider'),
+  zaloOaFields: document.getElementById('zaloOaFields'),
+  zaloBotFields: document.getElementById('zaloBotFields'),
   zaloAccessToken: document.getElementById('zaloAccessToken'),
   zaloOaId: document.getElementById('zalo_oa_id'),
   zaloDryRun: document.getElementById('zaloDryRun'),
@@ -95,8 +98,24 @@ const els = {
   zaloTestSendBtn: document.getElementById('zaloTestSendBtn'),
   zaloTestSendLiveBtn: document.getElementById('zaloTestSendLiveBtn'),
   zaloTestPhone: document.getElementById('zaloTestPhone'),
+  zaloTestChatId: document.getElementById('zaloTestChatId'),
   zaloStatus: document.getElementById('zaloStatus'),
-  zaloResult: document.getElementById('zaloResult')
+  zaloResult: document.getElementById('zaloResult'),
+  // Zalo Bot Platform
+  zaloBotToken: document.getElementById('zaloBotToken'),
+  zaloBotAccount: document.getElementById('zaloBotAccount'),
+  zaloBotAutoReply: document.getElementById('zaloBotAutoReply'),
+  zaloBotVerifyBtn: document.getElementById('zaloBotVerifyBtn'),
+  zaloBotPollBtn: document.getElementById('zaloBotPollBtn'),
+  zaloBotWebhookInfoBtn: document.getElementById('zaloBotWebhookInfoBtn'),
+  zaloBotSendTestBtn: document.getElementById('zaloBotSendTestBtn'),
+  zaloTestRowBtn: document.getElementById('zaloTestRowBtn'),
+  zaloBotHint: document.getElementById('zaloBotHint'),
+  zaloBotShareLink: document.getElementById('zaloBotShareLink'),
+  zaloSubscribersTable: document.getElementById('zaloSubscribersTable'),
+  zaloSubscribersEmpty: document.getElementById('zaloSubscribersEmpty'),
+  zaloBotMessageWrap: document.getElementById('zaloBotMessageWrap'),
+  clearLogBtn: document.getElementById('clearLogBtn')
 };
 
 const textInputs = [
@@ -104,7 +123,8 @@ const textInputs = [
   'destination_folder_id','copy_name_template','output_dir','run_folder_name_template',
   'output_file_name_template','credentials_file','token_file','skip_zero_or_empty_column',
   'selected_sheet_rows',
-  'zalo_phone_column','zalo_template_id','zalo_link_field','zalo_drive_folder_id'
+  'zalo_phone_column','zalo_template_id','zalo_link_field','zalo_drive_folder_id',
+  'zalo_bot_message_template'
 ];
 const numberInputs = ['header_row_index','data_start_row_index','max_rows'];
 const selectInputs = ['output_format','placeholder_strategy','reference_strategy'];
@@ -112,7 +132,7 @@ const checkInputs = [
   'create_run_output_folder','split_outputs_by_row',
   'delete_generated_slides_after_export','skip_export_if_zero_or_empty',
   'export_selected_rows_only',
-  'zalo_enabled','zalo_resend_already_sent'
+  'zalo_enabled','zalo_resend_already_sent','zalo_bot_send_photo'
 ];
 
 let previewImages = [];
@@ -1133,6 +1153,182 @@ function renderZaloStatus(config) {
   els.zaloStatus.textContent = bits.join(' · ');
 }
 
+function renderZaloBotStatus(config) {
+  if (!config) return;
+  if (els.zaloProvider) els.zaloProvider.value = config.provider === 'bot' ? 'bot' : 'oa';
+  const showBot = !els.zaloProvider || els.zaloProvider.value === 'bot';
+  if (els.zaloOaFields) els.zaloOaFields.style.display = showBot ? 'none' : 'block';
+  if (els.zaloBotFields) els.zaloBotFields.style.display = showBot ? 'block' : 'none';
+  if (els.zaloBotMessageWrap) els.zaloBotMessageWrap.style.display = showBot ? 'block' : 'none';
+  if (els.zaloBotAutoReply) els.zaloBotAutoReply.checked = config.bot_auto_reply !== false;
+
+  if (els.zaloBotAccount) {
+    els.zaloBotAccount.value = config.bot_verified_at
+      ? `${config.bot_display_name || '(no name)'} - ${config.bot_account_name || ''}`.trim()
+      : (config.has_bot_token ? 'token saved, not verified yet' : '');
+  }
+  if (els.zaloBotShareLink) {
+    const link = config.bot_share_link || '';
+    els.zaloBotShareLink.textContent = link || '-';
+    els.zaloBotShareLink.href = link || '#';
+  }
+  if (els.zaloBotHint) {
+    const bits = [];
+    bits.push(config.has_bot_token ? `token ${config.bot_token_preview}` : 'no bot token yet');
+    bits.push(config.dry_run ? 'DRY-RUN' : 'LIVE');
+    bits.push(`${config.linked_chats || 0} linked chat(s)`);
+    if (config.bot_last_poll_error) bits.push(`last poll error: ${config.bot_last_poll_error}`);
+    els.zaloBotHint.textContent = bits.join(' | ');
+  }
+}
+
+function renderZaloSubscribers(list) {
+  if (!els.zaloSubscribersTable) return;
+  const tbody = els.zaloSubscribersTable.querySelector('tbody');
+  const rows = Array.isArray(list) ? list : [];
+  tbody.innerHTML = '';
+  rows.forEach((item) => {
+    const tr = document.createElement('tr');
+    [
+      item.chat_id,
+      item.display_name || '-',
+      item.linked ? item.phone_masked : 'not linked yet',
+      item.linked ? `${(item.linked_at || '').slice(0, 10)} (${item.linked_by || 'self'})` : '-',
+      String(item.message_count || 0)
+    ].forEach((text) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    const actions = document.createElement('td');
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = 'Remove';
+    del.addEventListener('click', () => removeZaloSubscriber(item.chat_id));
+    actions.appendChild(del);
+    tr.appendChild(actions);
+    tbody.appendChild(tr);
+  });
+  if (els.zaloSubscribersEmpty) els.zaloSubscribersEmpty.style.display = rows.length ? 'none' : 'block';
+}
+
+async function refreshZaloSubscribers() {
+  if (!els.zaloSubscribersTable) return;
+  try {
+    const body = await api('/api/zalo/subscribers');
+    renderZaloSubscribers(body.subscribers || []);
+  } catch (error) {
+    if (els.zaloBotHint) els.zaloBotHint.textContent = `Subscriber list unavailable: ${error.message}`;
+  }
+}
+
+async function removeZaloSubscriber(chatId) {
+  if (!confirm(`Forget the Zalo chat ${chatId}?`)) return;
+  try {
+    await api(`/api/zalo/subscribers/${encodeURIComponent(chatId)}`, { method: 'DELETE' });
+    log(`Removed Zalo chat ${chatId}.`);
+    await refreshZaloSubscribers();
+  } catch (error) {
+    showZaloResult(String(error.message));
+  }
+}
+
+async function verifyZaloBot() {
+  try {
+    showLoading('Checking the bot token with Zalo...');
+    const typed = els.zaloBotToken ? els.zaloBotToken.value.trim() : '';
+    const body = await api('/api/zalo/bot/verify', {
+      method: 'POST',
+      body: JSON.stringify(typed ? { bot_token: typed } : {})
+    });
+    if (els.zaloBotToken) els.zaloBotToken.value = '';
+    renderZaloBotStatus(body.config || {});
+    log(`Bot verified: ${body.bot.display_name} (${body.bot.account_name}).`);
+    showZaloResult({ bot: body.bot });
+    await refreshZaloSubscribers();
+  } catch (error) {
+    log(`Verify bot failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  } finally {
+    hideLoading();
+  }
+}
+
+async function pollZaloBot() {
+  try {
+    showLoading('Reading the bot inbox (long poll)...');
+    const body = await api('/api/zalo/bot/poll', { method: 'POST', body: JSON.stringify({ timeout: 5 }) });
+    renderZaloSubscribers(body.subscribers || []);
+    log(`Bot poll: ${body.updates_seen} update(s)${body.timed_out ? ' - inbox empty' : ''}.`);
+    showZaloResult({
+      updates_seen: body.updates_seen,
+      inbox_empty: body.timed_out,
+      handled: (body.results || []).map((item) => ({
+        action: item.action,
+        from: item.display_name,
+        chat_id: item.chat_id,
+        phone: item.phone_masked,
+        replied: item.reply_sent
+      })),
+      logs: body.logs
+    });
+  } catch (error) {
+    log(`Bot poll failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  } finally {
+    hideLoading();
+  }
+}
+
+async function checkZaloWebhook() {
+  try {
+    const body = await api('/api/zalo/bot/webhook-info');
+    if (body.registered === false) {
+      showZaloResult({ webhook: 'none', note: body.message });
+      log('Zalo webhook: none registered (polling is used instead).');
+      return;
+    }
+    showZaloResult({ webhook: body.info });
+  } catch (error) {
+    showZaloResult(String(error.message));
+  }
+}
+
+// Build (and optionally really send) the bot message for the first/selected sheet row.
+async function sendZaloBotTest(live) {
+  if (live && !confirm('This sends a REAL Zalo message to that chat. Continue?')) return;
+  try {
+    showLoading(live ? 'Sending the bot test...' : 'Building the bot test...');
+    const profile = buildProfileFromForm();
+    const chatId = els.zaloTestChatId ? els.zaloTestChatId.value.trim() : '';
+    const phone = els.zaloTestPhone ? els.zaloTestPhone.value.trim() : '';
+    const payload = { profile_name: profile.name, live };
+    if (chatId) payload.chat_id = chatId;
+    else if (phone) payload.phone = phone;
+    else payload.chat_id = 'dry-run-preview';
+    const firstRow = Array.isArray(adminRowRecords) && adminRowRecords[0]
+      ? Number(adminRowRecords[0].sheet_row)
+      : 0;
+    if (Number.isInteger(firstRow) && firstRow > 0) payload.sheet_row = firstRow;
+
+    const body = await api('/api/zalo/bot/send-test', { method: 'POST', body: JSON.stringify(payload) });
+    log(`Bot test (${body.live ? 'live' : 'dry-run'}) -> chat ${body.chat_id}`);
+    showZaloResult({
+      mode: body.live ? 'LIVE' : 'DRY-RUN',
+      chat_id: body.chat_id,
+      message: body.text,
+      result: body.result,
+      logs: body.logs
+    });
+    if (live) await refreshZaloSubscribers();
+  } catch (error) {
+    log(`Bot test failed: ${error.message}`);
+    showZaloResult(String(error.message));
+  } finally {
+    hideLoading();
+  }
+}
+
 async function loadZaloConfigPanel() {
   try {
     const body = await api('/api/zalo/config');
@@ -1140,6 +1336,8 @@ async function loadZaloConfigPanel() {
     if (els.zaloDryRun) els.zaloDryRun.checked = Boolean(config.dry_run);
     if (els.zaloOaId && !els.zaloOaId.value) els.zaloOaId.value = config.oa_id || '';
     renderZaloStatus(config);
+    renderZaloBotStatus(config);
+    await refreshZaloSubscribers();
   } catch (error) {
     if (els.zaloStatus) els.zaloStatus.textContent = `Zalo settings unavailable: ${error.message}`;
   }
@@ -1151,11 +1349,17 @@ async function saveZaloConfigPanel() {
       dry_run: Boolean(els.zaloDryRun && els.zaloDryRun.checked),
       oa_id: els.zaloOaId ? els.zaloOaId.value.trim() : ''
     };
+    if (els.zaloProvider) payload.provider = els.zaloProvider.value;
+    if (els.zaloBotAutoReply) payload.bot_auto_reply = els.zaloBotAutoReply.checked;
     const typed = els.zaloAccessToken ? els.zaloAccessToken.value.trim() : '';
     if (typed) payload.access_token = typed;
+    const typedBot = els.zaloBotToken ? els.zaloBotToken.value.trim() : '';
+    if (typedBot) payload.bot_token = typedBot;
     const body = await api('/api/zalo/config', { method: 'POST', body: JSON.stringify(payload) });
     if (els.zaloAccessToken) els.zaloAccessToken.value = '';
+    if (els.zaloBotToken) els.zaloBotToken.value = '';
     renderZaloStatus(body.config || {});
+    renderZaloBotStatus(body.config || {});
     log('Zalo settings saved.');
     showZaloResult(body.config || {});
   } catch (error) {
@@ -1182,7 +1386,14 @@ async function verifyZaloDrive() {
   }
 }
 
-async function testZaloTemplate(live) {
+// One test entry point in the UI: routes to whichever provider is selected.
+async function sendZaloTest(live) {
+  const provider = els.zaloProvider ? els.zaloProvider.value : 'oa';
+  if (provider === 'bot') return sendZaloBotTest(live);
+  return sendZaloTemplate(live);
+}
+
+async function sendZaloTemplate(live) {
   if (live && !confirm('This sends a REAL Zalo message to the number below. Continue?')) return;
   try {
     showLoading(live ? 'Sending the test message...' : 'Building the test message...');
@@ -1219,8 +1430,20 @@ async function init() {
   initZoomPan();
   if (els.zaloSaveConfigBtn) els.zaloSaveConfigBtn.addEventListener('click', saveZaloConfigPanel);
   if (els.zaloVerifyDriveBtn) els.zaloVerifyDriveBtn.addEventListener('click', verifyZaloDrive);
-  if (els.zaloTestSendBtn) els.zaloTestSendBtn.addEventListener('click', () => testZaloTemplate(false));
-  if (els.zaloTestSendLiveBtn) els.zaloTestSendLiveBtn.addEventListener('click', () => testZaloTemplate(true));
+  if (els.zaloTestSendBtn) els.zaloTestSendBtn.addEventListener('click', () => sendZaloTest(false));
+  if (els.zaloTestSendLiveBtn) els.zaloTestSendLiveBtn.addEventListener('click', () => sendZaloTest(true));
+  // Zalo Bot Platform
+  if (els.zaloBotVerifyBtn) els.zaloBotVerifyBtn.addEventListener('click', verifyZaloBot);
+  if (els.zaloBotPollBtn) els.zaloBotPollBtn.addEventListener('click', pollZaloBot);
+  if (els.zaloBotWebhookInfoBtn) els.zaloBotWebhookInfoBtn.addEventListener('click', checkZaloWebhook);
+  if (els.zaloBotSendTestBtn) els.zaloBotSendTestBtn.addEventListener('click', () => sendZaloBotTest(true));
+  if (els.zaloTestRowBtn) els.zaloTestRowBtn.addEventListener('click', () => sendZaloBotTest(false));
+  if (els.clearLogBtn) els.clearLogBtn.addEventListener('click', clearLog);
+  if (els.zaloProvider) {
+    els.zaloProvider.addEventListener('change', () => {
+      renderZaloBotStatus({ provider: els.zaloProvider.value, bot_auto_reply: true });
+    });
+  }
   await loadZaloConfigPanel();
   await refreshProfiles();
   await refreshAccounts();

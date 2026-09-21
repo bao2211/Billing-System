@@ -54,16 +54,20 @@ let previewImages = [];
 let previewIndex = 0;
 
 /* ---------- Zalo delivery (optional, per export run) ---------- */
-const zaloInfo = { loaded: false, capable: false, rowsWithPhone: 0, rowsTotal: 0, phoneColumn: '', dryRun: true, hasToken: false };
+const zaloInfo = { loaded: false, capable: false, rowsWithPhone: 0, rowsTotal: 0, phoneColumn: '', dryRun: true, hasToken: false, provider: 'oa', linkedChats: 0 };
 
 async function loadZaloStatus() {
   try {
     const body = await api('/api/zalo/status');
     zaloInfo.dryRun = body.dry_run !== false;
     zaloInfo.hasToken = Boolean(body.has_token);
+    zaloInfo.provider = body.provider === 'bot' ? 'bot' : 'oa';
+    zaloInfo.linkedChats = Number(body.linked_chats || 0);
   } catch (error) {
     zaloInfo.dryRun = true;
     zaloInfo.hasToken = false;
+    zaloInfo.provider = 'oa';
+    zaloInfo.linkedChats = 0;
   }
 }
 
@@ -80,7 +84,9 @@ function updateZaloAvailability() {
     els.notifyZaloRow.style.display = 'none';
     if (els.notifyZaloHint) {
       els.notifyZaloHint.textContent = zaloInfo.phoneColumn
-        ? 'Zalo delivery is not set up for this profile yet (ask your admin for the template id and Drive folder).'
+        ? (zaloInfo.provider === 'bot'
+          ? 'Zalo delivery is not set up for this profile yet (ask your admin for the Zalo bot and Drive folder).'
+          : 'Zalo delivery is not set up for this profile yet (ask your admin for the template id and Drive folder).')
         : 'No phone column found in this sheet, so bills cannot be sent via Zalo.';
     }
     return;
@@ -97,7 +103,8 @@ function updateZaloAvailability() {
     ? `${zaloInfo.rowsWithPhone}/${zaloInfo.rowsTotal} row(s) have a phone number and can be sent`
     : 'no row in this sheet has a phone number yet');
   if (zaloInfo.dryRun) bits.push('DRY-RUN: messages are only simulated');
-  else if (!zaloInfo.hasToken) bits.push('no Zalo OA token configured - sending would fail');
+  else if (!zaloInfo.hasToken) bits.push(zaloInfo.provider === 'bot' ? 'no Zalo bot token configured - sending would fail' : 'no Zalo OA token configured - sending would fail');
+  if (zaloInfo.provider === 'bot') bits.push(`${zaloInfo.linkedChats} tenant chat(s) linked to the bot`);
   bits.push(`phone column: ${zaloInfo.phoneColumn || '-'}`);
   if (els.notifyZaloHint) els.notifyZaloHint.textContent = bits.join(' · ');
 }
@@ -468,7 +475,12 @@ async function runExportNow() {
         els.exportNotifySummary.textContent = 'Zalo: not requested for this run.';
       } else if (counts) {
         const dry = result.notifications.dry_run ? ' (dry-run)' : '';
-        els.exportNotifySummary.textContent = `Zalo${dry}: ${counts.sent || 0} sent · ${counts.simulated || 0} simulated · ${counts.skipped || 0} skipped · ${counts.failed || 0} failed`;
+        let line = `Zalo${dry}: ${counts.sent || 0} sent · ${counts.simulated || 0} simulated · ${counts.skipped || 0} skipped · ${counts.failed || 0} failed`;
+        const needsLink = Number(result.notifications.needs_link || 0);
+        if (needsLink > 0 && result.notifications.provider === 'bot') {
+          line += ` · ${needsLink} tenant(s) must send their phone number to the Zalo bot once`;
+        }
+        els.exportNotifySummary.textContent = line;
       } else {
         els.exportNotifySummary.textContent = '';
       }

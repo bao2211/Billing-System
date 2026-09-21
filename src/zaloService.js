@@ -1,6 +1,19 @@
 const fs = require('fs');
 const path = require('path');
-const { loadZaloConfig, appendNotification, findNotification } = require('./zaloStore');
+const { loadZaloConfig, saveZaloConfig, appendNotification, findNotification } = require('./zaloStore');
+const {
+  sendBotMessage,
+  sendBotPhoto,
+  getBotUpdates,
+  getBotMe
+} = require('./zaloBotService');
+const {
+  findByPhone,
+  findByChatId,
+  upsertSubscriber,
+  hasSeenUpdate,
+  rememberUpdate
+} = require('./zaloSubscriberStore');
 
 // Zalo Business Solutions - send a template message by phone number (the ZNS successor).
 const TEMPLATE_ENDPOINT = 'https://business.openapi.zalo.me/message/template';
@@ -67,6 +80,7 @@ function resolveTemplateValue(spec, context) {
     if (key === 'profile') return String(profile.name || '');
     if (key === 'date') return formatDateVN(new Date());
     if (key === 'sheet_row') return String(record.sheet_row || '');
+    if (key === 'period') return String(extra.period || '');
     if (key === 'room') return String(data[extra.room_column] || '');
     if (key === 'bill') return String(data[extra.bill_column] || '');
     if (key === 'phone') return String(data[extra.phone_column] || '');
@@ -95,6 +109,242 @@ function buildTemplateData(options = {}) {
   if (linkField && !data[linkField]) data[linkField] = link || '';
   return data;
 }
+
+/* =========================================================================
+ * Zalo Bot Platform delivery
+ *
+ * The Bot API cannot address a phone number - it sends to a chat_id, which only
+ * exists after the tenant has messaged the bot once. So a bill is routed
+ * phone -> chat_id through zaloSubscribers.json, and the message body is free
+ * text (no pre-approved ZNS template to wait for).
+ * ========================================================================= */
+
+// Free-text message used when the profile does not define its own. Lines whose
+// tokens resolve to nothing are dropped, so a spare sheet never shows "Khách hàng:".
+const DEFAULT_BOT_MESSAGE_TEMPLATE = [
+  '🧾 HÓA ĐƠN THANH TOÁN',
+  'Cơ sở: {{profile}}',
+  'Phòng: {{room}}',
+  'Khách hàng: {{customer}}',
+  'Kỳ: {{period}}',
+  'Số tiền: {{total}}',
+  'Ngày gửi: {{date}}',
+  '',
+  'Xem hóa đơn: {{link}}'
+].join('\n');
+
+// Tokens that mean something without a matching sheet column.
+function resolveMessageTokenName(key) {
+  return ['link', 'profile', 'date', 'period', 'sheet_row', 'room', 'bill', 'phone'].includes(key);
+}
+
+// Like resolveTemplateValue, but for a {{token}} embedded in a longer message:
+// built-ins first, then a sheet column (exact, then accent-folded), else ''.
+function resolveMessageToken(key, context) {
+  const token = String(key || '').trim();
+  if (!token) return '';
+  const lower = token.toLowerCase();
+  if (resolveMessageTokenName(lower)) return resolveTemplateValue(`{{${lower}}}`, context);
+
+  const { record, headers, extra } = context;
+  const data = record.data || {};
+  const exact = headers.find((h) => h === token);
+  if (exact) return String(data[exact] ?? '');
+
+  const folded = foldKey(token);
+  const match = headers.find((h) => foldKey(h) === folded);
+  if (match) return String(data[match] ?? '');
+
+  // Friendly aliases for the money column, which is named differently per sheet.
+  if (['total', 'amount', 'sotien', 'tong', 'tongcong', 'thanhtien'].includes(folded)) {
+    const totalHeader = headers.find((h) =>
+      ['tongcong', 'tong', 'thanhtien', 'sotien', 'total', 'amount'].includes(foldKey(h)));
+    if (totalHeader) return String(data[totalHeader] ?? '');
+  }
+  return '';
+}
+
+// Render the bill message. Kept dependency-free of the export pipeline so it can be
+// unit-tested from a plain object.
+function buildBotMessage(options = {}) {
+  const { profile = {}, record = {}, link = '', extra = {} } = options;
+  const headers = Object.keys(record.data || {});
+  const context = { profile, record, headers, link, extra };
+  const template = String(profile.zalo_bot_message_template || '').trim() || DEFAULT_BOT_MESSAGE_TEMPLATE;
+
+  const lines = template.split(/\r?\n/).map((line) => {
+    const hadToken = /\{\{[^}]+\}\}/.test(line);
+    const rendered = line.replace(/\{\{([^}]+)\}\}/g, (_match, key) => resolveMessageToken(key, context)).trimEnd();
+    if (!rendered.trim()) return hadToken ? null : '';
+    // Drop "Nhãn:" lines whose only value resolved to empty.
+    if (hadToken && /^\s*[^:]*:\s*$/.test(rendered)) return null;
+    return rendered;
+  }).filter((line) => line !== null);
+
+  const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return text || `${profile.name || 'Hóa đơn'}${link ? `\n${link}` : ''}`;
+}
+
+// Pull the first Vietnamese mobile number out of a free-text message. Tenants type
+// "0934103951", "0934 103 951", "+84 934 103 951" or paste it after other words, so
+// every digit run is scanned and re-tried from each plausible start.
+function extractPhoneFromText(text) {
+  const raw = String(text == null ? '' : text);
+  if (!raw.trim()) return { ok: false, reason: 'empty message' };
+  const runs = raw.match(/\+?[\d][\d\s.\-()]{6,22}\d|\+?\d{9,12}/g) || [];
+  for (const run of runs) {
+    const trimmed = run.trim();
+    const digits = trimmed.replace(/\D/g, '');
+    const variants = new Set([trimmed, digits]);
+    for (let i = 0; i < digits.length; i += 1) {
+      if (digits[i] === '0' || digits.startsWith('84', i)) {
+        variants.add(digits.slice(i, i + 12));
+      }
+    }
+    for (const candidate of variants) {
+      const parsed = normalizePhone(candidate);
+      if (parsed.ok) return parsed;
+    }
+  }
+  return { ok: false, reason: 'no Vietnamese mobile number in the message' };
+}
+
+// Onboarding copy. Plain text only: the Bot Platform strips unknown markup.
+const BOT_GREETINGS = new Set(['start', 'help', 'menu', 'hi', 'hello', 'chao', 'xinchao', 'batdau', 'lienket', 'link', 'ketnoi', 'bot', 'bill', 'hoadon']);
+
+function botHelpText(displayName) {
+  const who = displayName ? ` ${displayName}` : '';
+  return [
+    `👋 Xin chào${who}!`,
+    '',
+    'Đây là kênh gửi hóa đơn tự động.',
+    'Để nhận hóa đơn qua Zalo, bạn hãy gửi SỐ ĐIỆN THOẠI đã đăng ký với ban quản lý.',
+    '',
+    'Ví dụ: 0934103951'
+  ].join('\n');
+}
+
+function botLinkedText(masked) {
+  return [
+    `✅ Đã liên kết số ${masked} với cuộc trò chuyện này.`,
+    '',
+    'Từ giờ hóa đơn của bạn sẽ được gửi tự động tại đây.'
+  ].join('\n');
+}
+
+// Zalo Bot Platform is a chat channel, so a bill can only be delivered once the
+// tenant has started the conversation. Returns the bot identity for the admin panel.
+async function verifyBotToken(token, options = {}) {
+  const me = await getBotMe(String(token || '').trim(), options);
+  const accountName = String(me.account_name || '');
+  return {
+    id: String(me.id || ''),
+    account_name: accountName,
+    display_name: String(me.display_name || ''),
+    account_type: String(me.account_type || ''),
+    can_join_groups: me.can_join_groups === true,
+    share_link: accountName ? `https://zalo.me/${accountName}` : ''
+  };
+}
+
+function isBotConfigured(config = {}) {
+  return Boolean(String(config.bot_token || '').trim());
+}
+
+// Handle one incoming bot message: bind a phone when the tenant sends one, otherwise
+// answer with instructions. Never throws - the caller is usually a poller.
+async function ingestBotUpdate(options = {}) {
+  const { update = {}, config = loadZaloConfig(), logger = () => {} } = options;
+  const autoReply = options.autoReply !== false && config.bot_auto_reply !== false;
+  const outcome = {
+    chat_id: update.chat_id || '',
+    message_id: update.message_id || '',
+    event_name: update.event_name || '',
+    display_name: update.from_name || '',
+    action: 'ignored',
+    phone_masked: '',
+    reply_sent: false,
+    reply_text: ''
+  };
+  if (!update.chat_id) {
+    outcome.action = 'no_chat_id';
+    return outcome;
+  }
+  if (update.from_is_bot) {
+    outcome.action = 'from_bot';
+    return outcome;
+  }
+  if (hasSeenUpdate(update.chat_id, update.message_id)) {
+    outcome.action = 'duplicate';
+    return outcome;
+  }
+
+  const text = update.text || update.caption || '';
+  const before = findByChatId(update.chat_id);
+  const parsed = extractPhoneFromText(text);
+
+  upsertSubscriber({
+    chat_id: update.chat_id,
+    chat_type: update.chat_type,
+    user_id: update.from_id,
+    display_name: update.from_name,
+    last_text: text
+  });
+
+  let reply = '';
+  if (parsed.ok) {
+    upsertSubscriber({ chat_id: update.chat_id, phone: parsed.phone, linked_by: 'self', touch: false });
+    outcome.action = before && before.phone ? 'relinked' : 'linked';
+    outcome.phone_masked = maskPhone(parsed.phone);
+    reply = botLinkedText(maskPhone(parsed.phone));
+  } else if (BOT_GREETINGS.has(foldKey(text)) || !text.trim()) {
+    outcome.action = before && before.phone ? 'greeted_linked' : 'greeted';
+    reply = before && before.phone
+      ? `👋 Xin chào${update.from_name ? ` ${update.from_name}` : ''}!\n\nSố ${maskPhone(before.phone)} đã được liên kết. Hóa đơn sẽ được gửi tự động tại đây.`
+      : botHelpText(update.from_name);
+  } else {
+    outcome.action = 'needs_phone';
+    reply = [
+      'Mình chưa tìm thấy số điện thoại trong tin nhắn.',
+      '',
+      'Vui lòng gửi số điện thoại đã đăng ký với ban quản lý (ví dụ: 0934103951) để nhận hóa đơn.'
+    ].join('\n');
+  }
+
+  if (reply && autoReply && isBotConfigured(config)) {
+    try {
+      const sent = await sendBotMessage(config.bot_token, { chatId: update.chat_id, text: reply });
+      outcome.reply_sent = true;
+      outcome.reply_msg_id = sent.message_id;
+    } catch (error) {
+      outcome.reply_error = String(error.message || error).slice(0, 200);
+      logger(`Zalo bot: could not answer ${update.chat_id} - ${outcome.reply_error}`);
+    }
+  }
+  outcome.reply_text = reply;
+  rememberUpdate(update.chat_id, update.message_id);
+  logger(`Zalo bot: ${outcome.action} from ${update.chat_id}${outcome.phone_masked ? ` (${outcome.phone_masked})` : ''}`);
+  return outcome;
+}
+
+// One long-poll round: fetch the pending updates and process each one.
+async function pollBotUpdates(options = {}) {
+  const config = options.config || loadZaloConfig();
+  if (!isBotConfigured(config)) throw new Error('No Zalo bot token configured.');
+  const logger = options.logger || (() => {});
+  const wait = options.timeout === undefined ? 10 : Number(options.timeout);
+  const { updates, timedOut } = await getBotUpdates(config.bot_token, { timeout: wait });
+  const results = [];
+  for (const update of updates) {
+    results.push(await ingestBotUpdate({ update, config, logger, autoReply: options.autoReply }));
+  }
+  saveZaloConfig({ bot_last_poll_at: Date.now(), bot_last_poll_error: '' });
+  if (updates.length) logger(`Zalo bot: ${updates.length} update(s) handled.`);
+  return { updates_seen: updates.length, timed_out: Boolean(timedOut), results };
+}
+
+
+
 
 function guessMimeType(filePath) {
   const ext = path.extname(String(filePath || '')).toLowerCase();
@@ -288,12 +538,36 @@ async function notifyBill(options = {}) {
   };
 
   if (!profile.zalo_enabled) return finish('skipped', 'zalo disabled');
-  if (!profile.zalo_template_id) return finish('skipped', 'no template id configured');
+
+  // Two delivery providers: 'oa' sends a pre-approved ZNS template by phone number,
+  // 'bot' sends free text to a chat the tenant has already opened with our bot.
+  const isBot = config.provider === 'bot';
+  entry.provider = isBot ? 'bot' : 'oa';
+  if (isBot) {
+    if (!isBotConfigured(config)) return finish('skipped', 'no Zalo bot token configured');
+  } else if (!profile.zalo_template_id) {
+    return finish('skipped', 'no template id configured');
+  }
   if (!extra.phone_column) return finish('skipped', 'no phone column detected');
 
   const parsed = normalizePhone((record.data || {})[extra.phone_column]);
   if (!parsed.ok) return finish('skipped', `phone ${parsed.reason}`);
   entry.phone_masked = maskPhone(parsed.phone); // only the masked value is stored
+
+  // A bot can only message a chat that exists, so the tenant has to have sent their
+  // phone number to the bot once. Skip (loudly) instead of failing the export.
+  let subscriber = null;
+  if (isBot) {
+    subscriber = findByPhone(parsed.phone);
+    if (!subscriber || !subscriber.chat_id) {
+      return finish(
+        'skipped',
+        'this phone has not linked to the Zalo bot yet - the tenant must send their phone number to the bot once',
+        { needs_link: true }
+      );
+    }
+    entry.chat_id = subscriber.chat_id;
+  }
 
   const billFile = pickBillFile(rowSummary);
   if (!billFile) return finish('skipped', 'no bill file was produced for this row');
@@ -325,6 +599,7 @@ async function notifyBill(options = {}) {
       });
       link = uploaded.webViewLink;
       entry.drive_file_id = uploaded.id;
+      entry.drive_content_link = uploaded.webContentLink || '';
       logger(`Zalo: uploaded ${path.basename(billFile)} to Drive (${Math.round(uploaded.size / 1024)} KB)`);
     } catch (error) {
       return finish('failed', `Drive upload failed: ${String(error.message || error).slice(0, 180)}`);
@@ -332,10 +607,52 @@ async function notifyBill(options = {}) {
   }
   entry.link = link;
 
-  const templateData = buildTemplateData({ profile, record, link, extra });
+  let result;
+  let templateData = null;
+
+  // ---- Provider: Zalo Bot Platform - free text to the chat the tenant opened ----
+  if (isBot) {
+    const message = buildBotMessage({ profile, record, link, extra: { ...extra, period } });
+    entry.message_text = message;
+    entry.message_chars = message.length;
+    if (entry.simulated) {
+      logger(`Zalo: [dry-run] would send a ${message.length}-char bot message to ${entry.phone_masked} (chat ${subscriber.chat_id})`);
+      logger(`Zalo: [dry-run] preview: ${message.split('\n').join(' | ').slice(0, 300)}`);
+      return finish('simulated', 'dry-run');
+    }
+    try {
+      result = await sendBotMessage(config.bot_token, { chatId: subscriber.chat_id, text: message });
+    } catch (error) {
+      return finish('failed', String(error.message || error).slice(0, 200));
+    }
+    entry.msg_id = result.message_id;
+    entry.sent_at = result.date || null;
+    logger(`Zalo: bot message sent to ${entry.phone_masked} (chat ${subscriber.chat_id})`);
+
+    // Optional attachment: only an image can go through sendPhoto, and the Drive link
+    // in the text already opens the receipt, so a failure here stays non-fatal.
+    const wantsPhoto = profile.zalo_bot_send_photo !== false;
+    if (wantsPhoto && /\.(png|jpe?g)$/i.test(billFile) && entry.drive_content_link) {
+      try {
+        const photo = await sendBotPhoto(config.bot_token, {
+          chatId: subscriber.chat_id,
+          photo: entry.drive_content_link,
+          caption: `Hóa đơn ${profile.name || ''}`.trim()
+        });
+        entry.photo_msg_id = photo.message_id;
+        logger('Zalo: bill image attached to the message.');
+      } catch (error) {
+        entry.photo_error = String(error.message || error).slice(0, 160);
+        logger(`Zalo: text delivered, but the image attachment failed - ${entry.photo_error}`);
+      }
+    }
+    return finish('sent');
+  }
+
+  // ---- Provider: Zalo OA / ZNS - pre-approved template addressed by phone number ----
+  templateData = buildTemplateData({ profile, record, link, extra });
   entry.template_data = templateData;
 
-  let result;
   try {
     result = await sendTemplateByPhone({
       accessToken: config.access_token,
@@ -362,8 +679,20 @@ module.exports = {
   TEMPLATE_ENDPOINT,
   OA_MESSAGE_ENDPOINT,
   OA_TOKEN_ENDPOINT,
+  DEFAULT_BOT_MESSAGE_TEMPLATE,
   normalizePhone,
   maskPhone,
+  // ---- Zalo Bot Platform ----
+  buildBotMessage,
+  resolveMessageToken,
+  extractPhoneFromText,
+  verifyBotToken,
+  isBotConfigured,
+  ingestBotUpdate,
+  pollBotUpdates,
+  botHelpText,
+  botLinkedText,
+  BOT_GREETINGS,
   buildTemplateData,
   notifyBill,
   pickBillFile,

@@ -93,13 +93,61 @@
         </p>
       </fieldset>
 
-      <!-- Zalo Official Account (global) -->
+      <!-- Zalo delivery (global) -->
       <fieldset class="form-section">
-        <legend>Zalo Official Account (global)</legend>
-        <p class="hint">One OA for the whole company. The access token lives in <code>zalo_config.json</code> (outside the profile, never committed to git). Bills are delivered through a Zalo-approved template, with the bill itself as a Google Drive link.</p>
+        <legend>Zalo delivery (global)</legend>
+        <p class="hint">One Zalo identity for the whole company. Tokens live in <code>zalo_config.json</code> (outside the profile, never committed to git). Pick the provider, then fill in the matching credentials.</p>
         <div class="grid">
-          <label>OA access token<input id="zaloAccessToken" type="password" placeholder="paste the OA access token" /></label>
-          <label>OA id (optional)<input id="zalo_oa_id" type="text" placeholder="e.g. 1234567890" /></label>
+          <label>Provider
+            <span class="field-hint">ZNS template by phone number, or Bot Platform chat message.</span>
+            <select id="zaloProvider">
+              <option value="oa">Zalo Official Account / ZNS (template by phone)</option>
+              <option value="bot">Zalo Bot Platform (chat message)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="zaloOaFields">
+          <div class="grid">
+            <label>OA access token<input id="zaloAccessToken" type="password" placeholder="paste the OA access token" /></label>
+            <label>OA id (optional)<input id="zalo_oa_id" type="text" placeholder="e.g. 1234567890" /></label>
+          </div>
+        </div>
+
+        <div id="zaloBotFields">
+          <div class="grid">
+            <label>Bot token
+              <span class="field-hint">Zalo Bot Manager sends it as &lt;id&gt;:&lt;secret&gt;.</span>
+              <input id="zaloBotToken" type="password" placeholder="3576164315943503983:UxJIJ..." />
+            </label>
+            <label>Bot account
+              <span class="field-hint">Filled in by "Verify bot token".</span>
+              <input id="zaloBotAccount" type="text" readonly placeholder="not verified yet" />
+            </label>
+          </div>
+          <label class="checkbox-inline">
+            <input id="zaloBotAutoReply" type="checkbox" /> Reply automatically so a tenant can link their phone
+          </label>
+          <div class="actions" style="border-top:none; padding-top:6px;">
+            <button id="zaloBotVerifyBtn" type="button">Verify bot token</button>
+            <button id="zaloBotPollBtn" type="button">Poll inbox now (5s)</button>
+            <button id="zaloBotWebhookInfoBtn" type="button">Webhook info</button>
+            <span id="zaloBotHint" class="muted"></span>
+          </div>
+          <p class="hint" style="margin:6px 0 0;">
+            Tenants must open the bot once and send the phone number on their bill before a bill can be delivered
+            (Zalo only allows a bot to message a chat that already exists).
+            Share link: <a id="zaloBotShareLink" href="#" target="_blank" rel="noopener">-</a>
+          </p>
+          <div id="zaloSubscribersWrap" style="margin-top:8px;">
+            <table class="data-table" id="zaloSubscribersTable" style="width:100%; font-size:12px;">
+              <thead>
+                <tr><th>Chat</th><th>Name</th><th>Phone</th><th>Linked</th><th>Msgs</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p class="hint" id="zaloSubscribersEmpty" style="margin:6px 0 0;">No tenant has messaged the bot yet.</p>
+          </div>
         </div>
         <label class="checkbox-inline">
           <input id="zaloDryRun" type="checkbox" /> Dry-run: build and log every message, never send
@@ -111,10 +159,16 @@
         </div>
         <div class="grid">
           <label>Test phone number<input id="zaloTestPhone" type="text" placeholder="0987654321" /></label>
+          <label>Test chat id (bot)
+            <span class="field-hint">Leave blank to use the phone above, which must already be linked.</span>
+            <input id="zaloTestChatId" type="text" placeholder="6ede9afa66b88fe6d6a9" />
+          </label>
         </div>
         <div class="actions" style="border-top:none; padding-top:4px;">
-          <button id="zaloTestSendBtn" type="button">Test template (dry-run)</button>
+          <button id="zaloTestSendBtn" type="button">Test message (dry-run)</button>
           <button id="zaloTestSendLiveBtn" type="button" class="danger">Send test for real</button>
+          <button id="zaloBotSendTestBtn" type="button">Send bot test for real</button>
+          <button id="zaloTestRowBtn" type="button">Build from sheet row</button>
         </div>
         <pre id="zaloResult" style="display:none; max-height:220px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px;"></pre>
       </fieldset>
@@ -235,7 +289,7 @@
       <!-- Zalo notifications (per profile) -->
       <fieldset class="form-section">
         <legend>Zalo notifications (this profile)</legend>
-        <p class="hint">After a bill is exported it is uploaded to the Drive folder and the tenant receives the approved Zalo template with the bill link. Needs the phone column in the sheet.</p>
+        <p class="hint">After a bill is exported it is uploaded to the Drive folder and the tenant is notified on Zalo. The delivery provider is chosen in the global "Zalo delivery" panel above. Needs the phone column in the sheet.</p>
         <label class="checkbox-inline"><input id="zalo_enabled" type="checkbox" /> Send each bill to the tenant's Zalo after export</label>
         <label class="checkbox-inline"><input id="zalo_resend_already_sent" type="checkbox" /> Resend even if this month's bill was already sent</label>
         <div class="grid">
@@ -247,6 +301,13 @@
         <label>Template field map — template parameter to sheet column, a {{token}} or a literal
           <textarea id="zalo_field_map" rows="4" placeholder='{"customer":"Tên","room":"{{room}}","amount":"Tổng","link":"{{link}}"}'></textarea>
         </label>
+        <div id="zaloBotMessageWrap">
+          <label>Bot message template — used by the Zalo Bot Platform provider
+            <span class="field-hint">Blank = built-in default. Use {{room}}, {{period}}, {{total}}, {{date}}, {{link}} or any sheet column name. Lines whose value is empty are dropped.</span>
+            <textarea id="zalo_bot_message_template" rows="5" placeholder="HÓA ĐƠN THANH TOÁN&#10;Cơ sở: {{profile}}&#10;Phòng: {{room}}&#10;Số tiền: {{total}}&#10;Xem hóa đơn: {{link}}"></textarea>
+          </label>
+          <label class="checkbox-inline"><input id="zalo_bot_send_photo" type="checkbox" /> Attach the bill image as a photo too (bot provider, images only)</label>
+        </div>
       </fieldset>
 
       <!-- Advanced Settings (collapsible) -->
@@ -427,6 +488,15 @@
           <button id="saveAccountBtn" class="primary">Save Account</button>
         </div>
       </fieldset>
+    </section>
+    <!-- Admin log: log() in app.js appends every action here -->
+    <section class="panel editor">
+      <h2>Log</h2>
+      <p class="editor-hint">Every admin action appends a line here, including Zalo Bot polling, verification and test sends.</p>
+      <div class="actions" style="border-top:none; padding-top:0;">
+        <button id="clearLogBtn" type="button">Clear log</button>
+      </div>
+      <pre id="logOutput" style="max-height:240px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; margin:0;"></pre>
     </section>
   </main>
 

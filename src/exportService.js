@@ -51,6 +51,10 @@ function defaultProfile() {
     zalo_drive_folder_id: '',
     zalo_skip_if_no_phone: true,
     zalo_resend_already_sent: false,
+    // Zalo Bot Platform: the free-text message body (blank = built-in default) and
+    // whether the bill image is attached as a photo on top of the Drive link.
+    zalo_bot_message_template: '',
+    zalo_bot_send_photo: true,
     credentials_file: null,
     token_file: './sheet_slide_export_token.json',
     placeholder_strategy: 'mapping_with_fallback',
@@ -113,6 +117,8 @@ function normalizeProfile(raw) {
   profile.zalo_drive_folder_id = String(profile.zalo_drive_folder_id || '').trim();
   profile.zalo_skip_if_no_phone = toBool(profile.zalo_skip_if_no_phone, true);
   profile.zalo_resend_already_sent = toBool(profile.zalo_resend_already_sent, false);
+  profile.zalo_bot_message_template = String(profile.zalo_bot_message_template || '').trim();
+  profile.zalo_bot_send_photo = toBool(profile.zalo_bot_send_photo, true);
 
   profile.selected_sheet_rows = Array.isArray(profile.selected_sheet_rows)
     ? profile.selected_sheet_rows.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 1)
@@ -394,6 +400,21 @@ function inferPhoneColumn(headers) {
     if (tokens.some((token) => key.includes(token))) return header;
   }
   return null;
+}
+
+// "Can this profile deliver a bill over Zalo at all?" The Drive folder is required
+// either way (the bill travels as a link); the OA provider additionally needs a
+// Zalo-approved template id, while the Bot provider needs a live bot token.
+function isZaloDeliveryConfigured(profile) {
+  if (!profile || !profile.zalo_drive_folder_id) return false;
+  let config = {};
+  try {
+    config = loadZaloConfig();
+  } catch (error) {
+    return false;
+  }
+  if (config.provider === 'bot') return Boolean(String(config.bot_token || '').trim());
+  return Boolean(profile.zalo_template_id);
 }
 
 function resolvePlaceholder(header, profile) {
@@ -858,7 +879,7 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
     total_rows_read: records.length,
     eligible_rows: selectedRecords.length,
     rows_with_phone: rowsWithPhone,
-    zalo_capable: Boolean(selectorProfile.zalo_template_id && selectorProfile.zalo_drive_folder_id),
+    zalo_capable: isZaloDeliveryConfigured(selectorProfile),
     skipped_rows: skippedRows.length + (selectionMeta.rows_without_room || []).length,
     skip_column: selectionMeta.skip_column || '',
     room_column: selectionMeta.room_column || '',
@@ -1018,7 +1039,13 @@ async function runExport(rawProfile, options = {}) {
     } else {
       logger('Zalo: no phone column detected - bills will not be sent.');
     }
-    if (!profile.zalo_template_id) logger('Zalo: no template id configured - bills will not be sent.');
+    const zaloIsBot = Boolean(zaloConfig && zaloConfig.provider === 'bot');
+    logger(`Zalo: delivery provider is ${zaloIsBot ? 'Zalo Bot Platform (chat message)' : 'Zalo OA/ZNS (template by phone)'}.`);
+    if (zaloIsBot) {
+      if (!zaloConfig.bot_token) logger('Zalo: no Zalo bot token configured - bills will not be sent.');
+    } else if (!profile.zalo_template_id) {
+      logger('Zalo: no template id configured - bills will not be sent.');
+    }
     if (!profile.zalo_drive_folder_id) logger('Zalo: no Drive folder configured - the bill link cannot be created.');
     if (zaloConfig && zaloConfig.dry_run !== false) {
       logger('Zalo: DRY-RUN is on - messages are built and logged but nothing is sent.');
@@ -1112,10 +1139,14 @@ async function runExport(rawProfile, options = {}) {
     const count = (status) => notes.filter((n) => n.status === status).length;
     summary.notifications = {
       enabled: true,
+      provider: zaloConfig && zaloConfig.provider === 'bot' ? 'bot' : 'oa',
       dry_run: !zaloConfig || zaloConfig.dry_run !== false,
       phone_column: phoneColumn,
       template_id: profile.zalo_template_id || '',
       drive_folder_id: profile.zalo_drive_folder_id || '',
+      // Rows whose tenant has not messaged the Zalo bot yet: the bill was exported but
+      // could not be delivered until that tenant links their phone.
+      needs_link: notes.filter((n) => n.needs_link === true).length,
       counts: {
         sent: count('sent'),
         simulated: count('simulated'),
@@ -1264,6 +1295,7 @@ module.exports = {
   readSheetValues,
   detectMappings,
   inferPhoneColumn,
+  isZaloDeliveryConfigured,
   inferRoomColumn,
   inferSkipColumn,
   resolveColumnName,
