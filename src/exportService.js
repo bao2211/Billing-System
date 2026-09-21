@@ -831,6 +831,11 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
   }
 
   const { selectedRecords, skippedRows, selectionMeta } = selectRecordsForExport(records, selectorProfile, logger);
+  const headerList = Object.keys(records[0].data || {});
+  const phoneRequested = String(selectorProfile.zalo_phone_column || '').trim();
+  const phoneColumn = phoneRequested
+    ? (resolveColumnName(headerList, phoneRequested) || '')
+    : (inferPhoneColumn(headerList) || '');
 
   return {
     headers: Object.keys(records[0].data || {}),
@@ -844,6 +849,7 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
     skipped_rows: skippedRows.length + (selectionMeta.rows_without_room || []).length,
     skip_column: selectionMeta.skip_column || '',
     room_column: selectionMeta.room_column || '',
+    phone_column: phoneColumn,
     skipped_detail: [...skippedRows, ...(selectionMeta.rows_without_room || [])].slice(0, 20)
   };
 }
