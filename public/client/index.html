@@ -48,6 +48,11 @@
         <button id="previewBillsBtn" class="large secondary">Preview Bills</button>
         <button id="runExportBtn" class="large primary">Run Export</button>
       </div>
+      <label id="notifyZaloRow" style="display:none; margin-top:12px; align-items:center; gap:8px; font-size:13px;">
+        <input id="notifyZaloToggle" type="checkbox" style="width:auto;" />
+        <span>Send each bill to the client's Zalo — only rows that have a phone number in the sheet</span>
+      </label>
+      <p id="notifyZaloHint" class="hint"></p>
     </section>
 
     <section class="panel" id="reportsPanel" style="display:none;">
@@ -141,6 +146,7 @@
         <button class="close-btn" data-close="exportModal">Close</button>
       </div>
       <p id="exportSummary"></p>
+      <p id="exportNotifySummary" class="hint"></p>
       <div class="download-all-wrap">
         <a id="downloadAllBtn" class="download-all" href="#" download>Download All (ZIP)</a>
       </div>

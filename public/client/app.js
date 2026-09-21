@@ -10,6 +10,9 @@ const els = {
   clearRowsBtn: document.getElementById('clearRowsBtn'),
   selectionSummary: document.getElementById('selectionSummary'),
   actionsPanel: document.getElementById('actionsPanel'),
+  notifyZaloRow: document.getElementById('notifyZaloRow'),
+  notifyZaloToggle: document.getElementById('notifyZaloToggle'),
+  notifyZaloHint: document.getElementById('notifyZaloHint'),
 
   loadingOverlay: document.getElementById('loadingOverlay'),
   loadingText: document.getElementById('loadingText'),
@@ -28,6 +31,7 @@ const els = {
 
   exportModal: document.getElementById('exportModal'),
   exportSummary: document.getElementById('exportSummary'),
+  exportNotifySummary: document.getElementById('exportNotifySummary'),
   downloadAllBtn: document.getElementById('downloadAllBtn'),
 
   reportsPanel: document.getElementById('reportsPanel'),
@@ -48,6 +52,55 @@ let rowSelectorHeaderKeys = [];
 let rowSelectorSelectedSet = new Set();
 let previewImages = [];
 let previewIndex = 0;
+
+/* ---------- Zalo delivery (optional, per export run) ---------- */
+const zaloInfo = { loaded: false, capable: false, rowsWithPhone: 0, rowsTotal: 0, phoneColumn: '', dryRun: true, hasToken: false };
+
+async function loadZaloStatus() {
+  try {
+    const body = await api('/api/zalo/status');
+    zaloInfo.dryRun = body.dry_run !== false;
+    zaloInfo.hasToken = Boolean(body.has_token);
+  } catch (error) {
+    zaloInfo.dryRun = true;
+    zaloInfo.hasToken = false;
+  }
+}
+
+function wireZaloToggleOnce() {
+  if (!els.notifyZaloToggle || els.notifyZaloToggle.dataset.wired === '1') return;
+  els.notifyZaloToggle.dataset.wired = '1';
+  els.notifyZaloToggle.addEventListener('change', () => { els.notifyZaloToggle.dataset.touched = '1'; });
+}
+
+function updateZaloAvailability() {
+  if (!els.notifyZaloRow) return;
+  wireZaloToggleOnce();
+  if (!zaloInfo.capable) {
+    els.notifyZaloRow.style.display = 'none';
+    if (els.notifyZaloHint) {
+      els.notifyZaloHint.textContent = zaloInfo.phoneColumn
+        ? 'Zalo delivery is not set up for this profile yet (ask your admin for the template id and Drive folder).'
+        : 'No phone column found in this sheet, so bills cannot be sent via Zalo.';
+    }
+    return;
+  }
+  els.notifyZaloRow.style.display = 'flex';
+  if (els.notifyZaloToggle) {
+    els.notifyZaloToggle.disabled = zaloInfo.rowsWithPhone === 0;
+    if (!els.notifyZaloToggle.disabled && els.notifyZaloToggle.dataset.touched !== '1') {
+      els.notifyZaloToggle.checked = Boolean(currentProfile && currentProfile.zalo_enabled);
+    }
+  }
+  const bits = [];
+  bits.push(zaloInfo.rowsWithPhone > 0
+    ? `${zaloInfo.rowsWithPhone}/${zaloInfo.rowsTotal} row(s) have a phone number and can be sent`
+    : 'no row in this sheet has a phone number yet');
+  if (zaloInfo.dryRun) bits.push('DRY-RUN: messages are only simulated');
+  else if (!zaloInfo.hasToken) bits.push('no Zalo OA token configured - sending would fail');
+  bits.push(`phone column: ${zaloInfo.phoneColumn || '-'}`);
+  if (els.notifyZaloHint) els.notifyZaloHint.textContent = bits.join(' · ');
+}
 
 function log(message) {
   const line = typeof message === 'string' ? message : JSON.stringify(message);
@@ -138,7 +191,7 @@ function renderRowTable() {
 
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
-  ['', 'Row', ...columns].forEach((t) => {
+  ['', 'Row', 'SĐT', ...columns].forEach((t) => {
     const th = document.createElement('th');
     th.textContent = t;
     headRow.appendChild(th);
@@ -164,6 +217,14 @@ function renderRowTable() {
     const rowTd = document.createElement('td');
     rowTd.textContent = String(row.sheet_row);
     tr.appendChild(rowTd);
+
+    const phoneTd = document.createElement('td');
+    phoneTd.textContent = row.phone_ok ? row.phone_masked : '—';
+    if (!row.phone_ok) {
+      phoneTd.style.color = '#8a94a6';
+      if (row.phone_reason) phoneTd.title = row.phone_reason;
+    }
+    tr.appendChild(phoneTd);
 
     columns.forEach((key) => {
       const td = document.createElement('td');
@@ -191,13 +252,23 @@ async function loadRowTable() {
     const result = body.result || {};
     rowSelectorHeaderKeys = result.headers || [];
     rowSelectorRows = result.rows || [];
+    zaloInfo.capable = Boolean(result.zalo_capable);
+    zaloInfo.phoneColumn = result.phone_column || '';
+    zaloInfo.rowsWithPhone = Number(result.rows_with_phone || 0);
+    zaloInfo.rowsTotal = Number(result.eligible_rows || 0);
+    if (!zaloInfo.loaded) {
+      await loadZaloStatus();
+      zaloInfo.loaded = true;
+    }
     els.rowSelectionSummary.textContent = [
       `Rows read: ${result.total_rows_read || 0}`,
       `Eligible rows: ${result.eligible_rows || 0}`,
       `Skipped rows: ${result.skipped_rows || 0}`,
-      `Displayed rows: ${result.displayed_rows || 0}`
+      `Displayed rows: ${result.displayed_rows || 0}`,
+      `With phone: ${zaloInfo.rowsWithPhone}`
     ].join(' | ');
     renderRowTable();
+    updateZaloAvailability();
   } catch (error) {
     alert(error.message);
     log(`Row load error: ${error.message}`);
@@ -381,15 +452,27 @@ async function runExportNow() {
   };
   showLoading('Exporting bills... this may take a moment.');
   try {
+    const notifyZalo = Boolean(els.notifyZaloToggle && els.notifyZaloToggle.checked && !els.notifyZaloToggle.disabled);
     const body = await api('/api/export', {
       method: 'POST',
-      body: JSON.stringify({ profile })
+      body: JSON.stringify({ profile, notify_via_zalo: notifyZalo })
     });
     (body.logs || []).forEach(log);
     const result = body.result || {};
     log(`Export completed. ${result.files?.length || 0} file(s) generated.`);
 
     els.exportSummary.textContent = `Exported ${result.processed_rows?.length || 0} row(s). ${result.files?.length || 0} file(s) ready for download.`;
+    if (els.exportNotifySummary) {
+      const counts = result.notifications && result.notifications.counts;
+      if (!notifyZalo) {
+        els.exportNotifySummary.textContent = 'Zalo: not requested for this run.';
+      } else if (counts) {
+        const dry = result.notifications.dry_run ? ' (dry-run)' : '';
+        els.exportNotifySummary.textContent = `Zalo${dry}: ${counts.sent || 0} sent · ${counts.simulated || 0} simulated · ${counts.skipped || 0} skipped · ${counts.failed || 0} failed`;
+      } else {
+        els.exportNotifySummary.textContent = '';
+      }
+    }
     els.downloadAllBtn.href = `/api/zip/${encodeURIComponent(result.run_id)}`;
 
     openModal(els.exportModal);

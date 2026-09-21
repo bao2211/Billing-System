@@ -413,6 +413,18 @@ app.post('/api/export', requireAuth, async (req, res) => {
   try {
     const profile = resolveProfileForRequest(req);
 
+    // The client portal may opt in or out of Zalo delivery for this run only.
+    const body = req.body || {};
+    if (typeof body.notify_via_zalo === 'boolean') {
+      if (body.notify_via_zalo && (!profile.zalo_template_id || !profile.zalo_drive_folder_id)) {
+        profile.zalo_enabled = false;
+        logger.log('Zalo: requested but this profile has no template id / Drive folder configured - Zalo is skipped for this run.');
+      } else {
+        profile.zalo_enabled = body.notify_via_zalo;
+        logger.log(`Zalo: ${body.notify_via_zalo ? 'enabled' : 'disabled'} for this run by the client portal.`);
+      }
+    }
+
     const runId = crypto.randomUUID();
     const runDir = path.join(DOWNLOADS_DIR, runId);
     fs.mkdirSync(runDir, { recursive: true });
@@ -443,7 +455,11 @@ app.post('/api/export', requireAuth, async (req, res) => {
 
     res.json({ ok: true, result: { ...result, run_id: runId, files }, logs: logger.dump() });
   } catch (error) {
-    res.status(error.status || 400).json({ error: String(error.message || error), logs: logger.dump() });
+    // Google API failures surface as bare "Internal Error"; keep the code so it is diagnosable.
+    const detail = error && error.code
+      ? `${error.message || error} (code ${error.code})`
+      : String(error.message || error);
+    res.status(error.status || 400).json({ error: detail, logs: logger.dump() });
   }
 });
 
@@ -700,6 +716,13 @@ app.get('/api/download/database', requireRole('admin'), async (req, res) => {
 });
 
 /* ---------- Zalo notifications (admin only) ---------- */
+
+// Read-only Zalo status any signed-in user may see (no secrets): the client portal uses it
+// to label the "send via Zalo" option.
+app.get('/api/zalo/status', requireAuth, (_req, res) => {
+  const config = loadZaloConfig();
+  res.json({ ok: true, dry_run: config.dry_run !== false, has_token: Boolean(config.access_token) });
+});
 
 app.get('/api/zalo/config', requireRole('admin'), (_req, res) => {
   res.json({ ok: true, config: publicZaloConfig() });

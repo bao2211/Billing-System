@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { google } = require('googleapis');
-const { notifyBill } = require('./zaloService');
+const { notifyBill, normalizePhone, maskPhone } = require('./zaloService');
 const { loadZaloConfig } = require('./zaloStore');
 
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -837,15 +837,28 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
     ? (resolveColumnName(headerList, phoneRequested) || '')
     : (inferPhoneColumn(headerList) || '');
 
-  return {
-    headers: Object.keys(records[0].data || {}),
-    rows: selectedRecords.slice(0, options.maxItems || 1000).map((record) => ({
+  // Tell the UI which rows can actually receive a Zalo message.
+  let rowsWithPhone = 0;
+  const rowPayload = selectedRecords.slice(0, options.maxItems || 1000).map((record) => {
+    const parsed = phoneColumn ? normalizePhone((record.data || {})[phoneColumn]) : { ok: false, reason: 'no phone column' };
+    if (parsed.ok) rowsWithPhone += 1;
+    return {
       sheet_row: Number(record.sheet_row),
-      data: record.data
-    })),
+      data: record.data,
+      phone_masked: parsed.ok ? maskPhone(parsed.phone) : '',
+      phone_ok: Boolean(parsed.ok),
+      phone_reason: parsed.ok ? '' : parsed.reason
+    };
+  });
+
+  return {
+    headers: headerList,
+    rows: rowPayload,
     displayed_rows: Math.min(selectedRecords.length, options.maxItems || 1000),
     total_rows_read: records.length,
     eligible_rows: selectedRecords.length,
+    rows_with_phone: rowsWithPhone,
+    zalo_capable: Boolean(selectorProfile.zalo_template_id && selectorProfile.zalo_drive_folder_id),
     skipped_rows: skippedRows.length + (selectionMeta.rows_without_room || []).length,
     skip_column: selectionMeta.skip_column || '',
     room_column: selectionMeta.room_column || '',
