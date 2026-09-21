@@ -31,7 +31,15 @@ const DEFAULTS = {
   bot_auto_reply: true,
   bot_poll_ms: 15000,
   bot_last_poll_at: 0,
-  bot_last_poll_error: ''
+  bot_last_poll_error: '',
+  // When a tenant has NOT opened the bot, the Bot Platform cannot reach them at all.
+  // ZBS Template Message can (it is addressed by phone number and needs no prior
+  // interaction), so this fallback keeps bills flowing - but it costs money per message,
+  // which is why it is OFF by default and must be turned on deliberately.
+  zns_fallback: false,
+  // A bot message is free; a ZNS template is billed per message. When a tenant HAS linked
+  // to the bot, prefer the free channel even if the OA provider is selected.
+  prefer_free_bot: true
 };
 
 function ensureConfig() {
@@ -99,6 +107,10 @@ function publicZaloConfig() {
     bot_last_poll_at: Number(config.bot_last_poll_at) || 0,
     bot_last_poll_error: config.bot_last_poll_error || '',
     linked_chats: countLinked(),
+    // ---- channel selection ----
+    zns_fallback: config.zns_fallback === true,
+    prefer_free_bot: config.prefer_free_bot !== false,
+    zns_ready: Boolean(config.access_token),
     // ---- shared ----
     rate_limit_ms: Number(config.rate_limit_ms) || DEFAULTS.rate_limit_ms
   };

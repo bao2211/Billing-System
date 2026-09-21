@@ -439,14 +439,14 @@ app.post('/api/export', requireAuth, async (req, res) => {
     // The client portal may opt in or out of Zalo delivery for this run only.
     const body = req.body || {};
     if (typeof body.notify_via_zalo === 'boolean') {
-      // A Drive folder is needed either way (the bill travels as a link); the OA
-      // provider additionally needs a Zalo-approved template id, while the Bot
-      // provider just needs the tenant's chat to be linked.
+      // A Drive folder is needed either way (the bill travels as a link); delivery then
+      // needs at least one working channel: the bot chat, a ZNS template, or both.
       const zaloConfig = loadZaloConfig();
-      const botProvider = zaloConfig.provider === 'bot';
+      const botChannel = isBotConfigured(zaloConfig);
+      const znsChannel = Boolean(profile.zalo_template_id) && Boolean(String(zaloConfig.access_token || '').trim());
       const missing = [];
       if (!profile.zalo_drive_folder_id) missing.push('Drive folder');
-      if (!botProvider && !profile.zalo_template_id) missing.push('Zalo template id');
+      if (!botChannel && !znsChannel) missing.push('a Zalo bot token or a ZNS template id');
       if (body.notify_via_zalo && missing.length) {
         profile.zalo_enabled = false;
         logger.log(`Zalo: requested but this profile has no ${missing.join(' and ')} configured - Zalo is skipped for this run.`);
@@ -789,6 +789,8 @@ app.post('/api/zalo/config', requireRole('admin'), (req, res) => {
     if (body.bot_poll_ms !== undefined) {
       patch.bot_poll_ms = Math.max(3000, Math.min(120000, Number(body.bot_poll_ms) || 15000));
     }
+    if (typeof body.zns_fallback === 'boolean') patch.zns_fallback = body.zns_fallback;
+    if (typeof body.prefer_free_bot === 'boolean') patch.prefer_free_bot = body.prefer_free_bot;
     saveZaloConfig(patch);
     restartBotPoller();
     res.json({ ok: true, config: publicZaloConfig() });

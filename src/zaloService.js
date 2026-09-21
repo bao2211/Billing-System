@@ -539,34 +539,66 @@ async function notifyBill(options = {}) {
 
   if (!profile.zalo_enabled) return finish('skipped', 'zalo disabled');
 
-  // Two delivery providers: 'oa' sends a pre-approved ZNS template by phone number,
-  // 'bot' sends free text to a chat the tenant has already opened with our bot.
-  const isBot = config.provider === 'bot';
-  entry.provider = isBot ? 'bot' : 'oa';
-  if (isBot) {
-    if (!isBotConfigured(config)) return finish('skipped', 'no Zalo bot token configured');
-  } else if (!profile.zalo_template_id) {
-    return finish('skipped', 'no template id configured');
-  }
+  // Two delivery channels:
+  //   'bot' - free text to a chat the tenant has already opened with our bot. A bot can
+  //           NEVER start a conversation, so this only works after the tenant messaged it.
+  //   'zns' - a pre-approved ZBS template addressed BY PHONE NUMBER. This is the only
+  //           channel that can reach a tenant who has never interacted with us.
+  // config.provider picks the preferred channel; the two flags below let the other one
+  // cover for it:
+  //   zns_fallback    (off by default - it costs money) rescue an unlinked tenant via ZNS
+  //   prefer_free_bot (on by default)  use the free bot chat for a linked tenant instead
+  //                                    of paying for a ZNS template
   if (!extra.phone_column) return finish('skipped', 'no phone column detected');
 
   const parsed = normalizePhone((record.data || {})[extra.phone_column]);
   if (!parsed.ok) return finish('skipped', `phone ${parsed.reason}`);
   entry.phone_masked = maskPhone(parsed.phone); // only the masked value is stored
 
-  // A bot can only message a chat that exists, so the tenant has to have sent their
-  // phone number to the bot once. Skip (loudly) instead of failing the export.
-  let subscriber = null;
-  if (isBot) {
-    subscriber = findByPhone(parsed.phone);
-    if (!subscriber || !subscriber.chat_id) {
+  const wantsBot = config.provider === 'bot';
+  // Record the configured preference immediately, so even a skipped row's ledger entry
+  // says which provider was intended. `channel` (below) is what actually carried it.
+  entry.provider = wantsBot ? 'bot' : 'oa';
+  const subscriber = findByPhone(parsed.phone);
+  const botReady = isBotConfigured(config) && Boolean(subscriber && subscriber.chat_id);
+  const znsReady = Boolean(String(config.access_token || '').trim()) && Boolean(profile.zalo_template_id);
+  const canFallBackToZns = config.zns_fallback === true && znsReady;
+  const canUseFreeBot = config.prefer_free_bot !== false && botReady;
+
+  let channel = 'none';
+  if (wantsBot) channel = botReady ? 'bot' : (canFallBackToZns ? 'zns' : 'none');
+  else channel = canUseFreeBot ? 'bot' : (znsReady ? 'zns' : 'none');
+
+  if (channel === 'none') {
+    if (wantsBot) {
+      if (!isBotConfigured(config)) return finish('skipped', 'no Zalo bot token configured');
+      // The tenant has not opened the bot, and we have no ZNS to fall back on.
       return finish(
         'skipped',
-        'this phone has not linked to the Zalo bot yet - the tenant must send their phone number to the bot once',
+        znsReady
+          ? 'this phone has not linked to the Zalo bot yet - the tenant must send their phone number to the bot once, or turn on the ZNS fallback'
+          : 'this phone has not linked to the Zalo bot yet - the tenant must send their phone number to the bot once',
         { needs_link: true }
       );
     }
+    return finish('skipped', 'no template id configured');
+  }
+
+  entry.channel = channel;
+  const isBot = channel === 'bot';
+  if (isBot) {
     entry.chat_id = subscriber.chat_id;
+  }
+  // Record when the chosen channel is not the configured preference, so the ledger
+  // explains itself.
+  if (wantsBot && !isBot) entry.fallback_from = 'bot';
+  if (!wantsBot && isBot) entry.fallback_from = 'oa';
+  if (entry.fallback_from) {
+    logger(
+      entry.fallback_from === 'bot'
+        ? `Zalo: ${entry.phone_masked} has not opened the bot, so this bill goes out as a ZNS template instead.`
+        : `Zalo: ${entry.phone_masked} has an open bot chat, so the free bot channel is used instead of a paid ZNS template.`
+    );
   }
 
   const billFile = pickBillFile(rowSummary);
@@ -669,7 +701,7 @@ async function notifyBill(options = {}) {
   entry.msg_id = result.msg_id;
   entry.quota = result.quota || null;
   if (result.simulated) {
-    logger(`Zalo: [dry-run] would send template ${profile.zalo_template_id} to ${entry.phone_masked}`);
+    logger(`Zalo: [dry-run] would send template ${profile.zalo_template_id} to ${entry.phone_masked} via ZNS${entry.fallback_from === 'bot' ? ' (fallback)' : ''}`);
     return finish('simulated', 'dry-run');
   }
   return finish('sent');

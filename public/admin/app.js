@@ -105,6 +105,8 @@ const els = {
   zaloBotToken: document.getElementById('zaloBotToken'),
   zaloBotAccount: document.getElementById('zaloBotAccount'),
   zaloBotAutoReply: document.getElementById('zaloBotAutoReply'),
+  zaloPreferFreeBot: document.getElementById('zaloPreferFreeBot'),
+  zaloZnsFallback: document.getElementById('zaloZnsFallback'),
   zaloBotVerifyBtn: document.getElementById('zaloBotVerifyBtn'),
   zaloBotPollBtn: document.getElementById('zaloBotPollBtn'),
   zaloBotWebhookInfoBtn: document.getElementById('zaloBotWebhookInfoBtn'),
@@ -1161,6 +1163,8 @@ function renderZaloBotStatus(config) {
   if (els.zaloBotFields) els.zaloBotFields.style.display = showBot ? 'block' : 'none';
   if (els.zaloBotMessageWrap) els.zaloBotMessageWrap.style.display = showBot ? 'block' : 'none';
   if (els.zaloBotAutoReply) els.zaloBotAutoReply.checked = config.bot_auto_reply !== false;
+  if (els.zaloPreferFreeBot) els.zaloPreferFreeBot.checked = config.prefer_free_bot !== false;
+  if (els.zaloZnsFallback) els.zaloZnsFallback.checked = config.zns_fallback === true;
 
   if (els.zaloBotAccount) {
     els.zaloBotAccount.value = config.bot_verified_at
@@ -1351,6 +1355,8 @@ async function saveZaloConfigPanel() {
     };
     if (els.zaloProvider) payload.provider = els.zaloProvider.value;
     if (els.zaloBotAutoReply) payload.bot_auto_reply = els.zaloBotAutoReply.checked;
+    if (els.zaloPreferFreeBot) payload.prefer_free_bot = els.zaloPreferFreeBot.checked;
+    if (els.zaloZnsFallback) payload.zns_fallback = els.zaloZnsFallback.checked;
     const typed = els.zaloAccessToken ? els.zaloAccessToken.value.trim() : '';
     if (typed) payload.access_token = typed;
     const typedBot = els.zaloBotToken ? els.zaloBotToken.value.trim() : '';

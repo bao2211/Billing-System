@@ -476,6 +476,13 @@ async function runExportNow() {
       } else if (counts) {
         const dry = result.notifications.dry_run ? ' (dry-run)' : '';
         let line = `Zalo${dry}: ${counts.sent || 0} sent · ${counts.simulated || 0} simulated · ${counts.skipped || 0} skipped · ${counts.failed || 0} failed`;
+        const ch = result.notifications.channels;
+        if (ch && (ch.bot || ch.zns)) {
+          const parts = [];
+          if (ch.bot) parts.push(`${ch.bot} via bot chat`);
+          if (ch.zns) parts.push(`${ch.zns} via ZNS template`);
+          line += ` · ${parts.join(', ')}`;
+        }
         const needsLink = Number(result.notifications.needs_link || 0);
         if (needsLink > 0 && result.notifications.provider === 'bot') {
           line += ` · ${needsLink} tenant(s) must send their phone number to the Zalo bot once`;

@@ -403,8 +403,8 @@ function inferPhoneColumn(headers) {
 }
 
 // "Can this profile deliver a bill over Zalo at all?" The Drive folder is required
-// either way (the bill travels as a link); the OA provider additionally needs a
-// Zalo-approved template id, while the Bot provider needs a live bot token.
+// either way (the bill travels as a link); delivery then needs the bot chat channel,
+// a ZNS template, or both.
 function isZaloDeliveryConfigured(profile) {
   if (!profile || !profile.zalo_drive_folder_id) return false;
   let config = {};
@@ -413,8 +413,9 @@ function isZaloDeliveryConfigured(profile) {
   } catch (error) {
     return false;
   }
-  if (config.provider === 'bot') return Boolean(String(config.bot_token || '').trim());
-  return Boolean(profile.zalo_template_id);
+  const botReady = Boolean(String(config.bot_token || '').trim());
+  const znsReady = Boolean(String(config.access_token || '').trim()) && Boolean(profile.zalo_template_id);
+  return botReady || znsReady;
 }
 
 function resolvePlaceholder(header, profile) {
@@ -1147,6 +1148,12 @@ async function runExport(rawProfile, options = {}) {
       // Rows whose tenant has not messaged the Zalo bot yet: the bill was exported but
       // could not be delivered until that tenant links their phone.
       needs_link: notes.filter((n) => n.needs_link === true).length,
+      // Which channel actually carried each bill (a fallback may differ from the
+      // configured preference: ZNS rescues an unlinked tenant, the free bot saves money).
+      channels: {
+        bot: notes.filter((n) => n.channel === 'bot').length,
+        zns: notes.filter((n) => n.channel === 'zns').length
+      },
       counts: {
         sent: count('sent'),
         simulated: count('simulated'),
