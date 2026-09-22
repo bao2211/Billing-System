@@ -859,11 +859,16 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
     ? (resolveColumnName(headerList, phoneRequested) || '')
     : (inferPhoneColumn(headerList) || '');
 
-  // Tell the UI which rows can actually receive a Zalo message.
-  let rowsWithPhone = 0;
+  // Tell the UI which rows can actually receive a Zalo message. The COUNT must cover every
+  // eligible row, not just the returned page: on a sheet with more eligible rows than
+  // maxItems, the only phone number could sit past the page boundary and the client would
+  // then wrongly disable the per-export Zalo opt-in.
+  const phoneOf = (record) => (phoneColumn
+    ? normalizePhone((record.data || {})[phoneColumn])
+    : { ok: false, reason: 'no phone column' });
+  const rowsWithPhone = selectedRecords.filter((record) => phoneOf(record).ok).length;
   const rowPayload = selectedRecords.slice(0, options.maxItems || 1000).map((record) => {
-    const parsed = phoneColumn ? normalizePhone((record.data || {})[phoneColumn]) : { ok: false, reason: 'no phone column' };
-    if (parsed.ok) rowsWithPhone += 1;
+    const parsed = phoneOf(record);
     return {
       sheet_row: Number(record.sheet_row),
       data: record.data,
@@ -880,6 +885,7 @@ async function getSheetRowSelectionPreview(rawProfile, options = {}) {
     total_rows_read: records.length,
     eligible_rows: selectedRecords.length,
     rows_with_phone: rowsWithPhone,
+    rows_with_phone_displayed: rowPayload.filter((r) => r.phone_ok).length,
     zalo_capable: isZaloDeliveryConfigured(selectorProfile),
     skipped_rows: skippedRows.length + (selectionMeta.rows_without_room || []).length,
     skip_column: selectionMeta.skip_column || '',

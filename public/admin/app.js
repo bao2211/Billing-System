@@ -193,6 +193,12 @@ async function api(url, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
+  // Sessions live in server memory, so a restart invalidates every open tab. Send the
+  // user back to the login page instead of surfacing a bare "Unauthorized" alert.
+  if (response.status === 401) {
+    window.location.href = '/?reason=session-expired';
+    return new Promise(() => {}); // the page is navigating away; stop this chain quietly
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.error) {
     throw new Error(body.error || `Request failed (${response.status})`);

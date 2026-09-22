@@ -90,6 +90,14 @@
     </form>
   </div>
   <script>
+    // Explain a redirect caused by an expired session (the server keeps sessions in
+    // memory, so a restart logs every open tab out).
+    if (new URLSearchParams(window.location.search).get('reason') === 'session-expired') {
+      const note = document.getElementById('error');
+      note.className = 'warn';
+      note.textContent = 'Your session has ended (the server was restarted). Please sign in again.';
+    }
+
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const username = document.getElementById('username').value;
