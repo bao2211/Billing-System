@@ -29,5 +29,6 @@ zalo_subscribers.json
 # ---- report artefacts: contain customer PII and are large binaries ----
 Document/_shots/
 Document/_fig/
+Document/_backup/
 Document/*.docx
 Document/*.pdf
