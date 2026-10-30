@@ -32,3 +32,6 @@ Document/_fig/
 Document/_backup/
 Document/*.docx
 Document/*.pdf
+
+# ---- knowledge-graph output (local tooling, regenerable) ----
+graphify-out/
